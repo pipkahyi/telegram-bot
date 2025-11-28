@@ -25,10 +25,10 @@ class ProfileStates(StatesGroup):
     waiting_photo = State()
 
 # Токен бота
-BOT_TOKEN = "8598478982:AAE-WKOEBHN8?XMn8b96m6pC39kJ4rNDEA"
+BOT_TOKEN = "8240552495:AAF-g-RGQKzxIGuXs5PQZwf1Asp6hIJ93U4"
 
 # ID администратора
-ADMIN_ID = 7788888499
+ADMIN_ID = 7788088499
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
