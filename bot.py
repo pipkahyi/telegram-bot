@@ -9,11 +9,11 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
 from aiogram.client.default import DefaultBotProperties
+from datetime import datetime
 
 # Состояния для анкеты
 class ProfileStates(StatesGroup):
@@ -25,14 +25,14 @@ class ProfileStates(StatesGroup):
     waiting_photo = State()
 
 # Токен бота
-BOT_TOKEN = "8240552495:AAF-g-RGQKzxIGuXs5PQZwf1Asp6hIJ93U4"
+BOT_TOKEN = "8598478982:AAE-WKOEBHN8?XMn8b96m6pC39kJ4rNDEA"
 
 # ID администратора
 ADMIN_ID = 7788888499
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
 
 # Глобальное соединение с БД
 db = None
@@ -173,9 +173,8 @@ async def init_db():
     
     # Основная таблица анкет
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS flood (
-            users_id INTEGER PRIMARY KEY,
-            full_name TEXT,
+        CREATE TABLE IF NOT EXISTS profiles (
+            user_id INTEGER PRIMARY KEY,
             username TEXT,
             name TEXT NOT NULL,
             role TEXT NOT NULL,
@@ -196,8 +195,7 @@ async def init_db():
             reporter_id INTEGER NOT NULL,
             reported_user_id INTEGER NOT NULL,
             reason TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (reported_user_id) REFERENCES flood (users_id)
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     
@@ -216,24 +214,24 @@ async def init_db():
     print("✅ База данных инициализирована")
 
 # Функция для сохранения профиля
-async def save_profile(user_id, full_name, username, name, role, age, city, bio, photo):
+async def save_profile(user_id, username, name, role, age, city, bio, photo):
     try:
-        cursor = await db.execute("SELECT users_id FROM flood WHERE users_id = ?", (user_id,))
+        cursor = await db.execute("SELECT user_id FROM profiles WHERE user_id = ?", (user_id,))
         existing_user = await cursor.fetchone()
         
         if existing_user:
             await db.execute("""
-                UPDATE flood SET 
-                full_name = ?, username = ?, name = ?, role = ?, age = ?, city = ?, bio = ?, photo = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE users_id = ?
-            """, (full_name, username, name, role, age, city, bio, photo, user_id))
+                UPDATE profiles SET 
+                username = ?, name = ?, role = ?, age = ?, city = ?, bio = ?, photo = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+            """, (username, name, role, age, city, bio, photo, user_id))
             action = "обновлена"
         else:
             await db.execute("""
-                INSERT INTO flood 
-                (users_id, full_name, username, name, role, age, city, bio, photo) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, full_name, username, name, role, age, city, bio, photo))
+                INSERT INTO profiles 
+                (user_id, username, name, role, age, city, bio, photo) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, name, role, age, city, bio, photo))
             action = "создана"
         
         await db.commit()
@@ -275,46 +273,69 @@ async def help_command(message: types.Message):
     )
     await message.answer(help_text, reply_markup=main_menu)
 
-# Команда для отладки
+# Красивая команда для отладки
 @dp.message(Command("debug"))
 async def debug_profiles(message: types.Message):
     if not is_admin(message.from_user.id):
-        if message.chat.type == "private":
-            await message.answer("❌ У вас нет прав доступа к этой команде.")
+        await message.answer("❌ У вас нет прав доступа к этой команде.")
         return
     
     try:
-        cursor = await db.execute("SELECT COUNT(*) FROM flood")
-        count = await cursor.fetchone()
+        # Получаем общее количество анкет
+        cursor = await db.execute("SELECT COUNT(*) FROM profiles")
+        count_result = await cursor.fetchone()
+        total_profiles = count_result[0] if count_result else 0
         
-        cursor = await db.execute("SELECT users_id, name, role, age, city FROM flood ORDER BY created_at DESC")
+        # Получаем все анкеты
+        cursor = await db.execute("""
+            SELECT user_id, username, name, role, age, city, photo, created_at 
+            FROM profiles 
+            ORDER BY created_at DESC
+        """)
         profiles = await cursor.fetchall()
         
-        result = f"📊 <b>Статистика базы данных</b>\n\n"
-        result += f"📈 Всего анкет: <b>{count[0]}</b>\n\n"
+        if not profiles:
+            await message.answer("📭 В базе данных нет анкет.")
+            return
         
-        if profiles:
-            result += "<b>📋 Список анкет:</b>\n"
-            result += "─" * 40 + "\n"
+        # Формируем красивый вывод
+        result = f"📊 <b>ОТЛАДОЧНАЯ ИНФОРМАЦИЯ</b>\n\n"
+        result += f"📈 Всего анкет в базе: <b>{total_profiles}</b>\n"
+        result += f"🕐 Запрос выполнен: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+        
+        result += "┌─────────────────────────────────────────────┐\n"
+        result += "│              📋 СПИСОК АНКЕТ               │\n"
+        result += "└─────────────────────────────────────────────┘\n\n"
+        
+        for i, (user_id, username, name, role, age, city, photo, created_at) in enumerate(profiles, 1):
+            username_display = f"@{username}" if username else "❌ нет"
+            photo_status = "✅ есть" if photo else "❌ нет"
+            created_date = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
             
-            for i, (user_id, name, role, age, city) in enumerate(profiles, 1):
-                result += f"#{i:02d} │ ID: {user_id}\n"
-                result += f"    │ 👤 {name}\n"
-                result += f"    │ 🎭 {role}\n"
-                result += f"    │ 🎂 {age} лет │ 🏙️ {city}\n"
-                
-                if i < len(profiles):
-                    result += "    ├" + "─" * 38 + "\n"
-                else:
-                    result += "    └" + "─" * 38 + "\n"
-                    
+            result += f"🔹 <b>Анкета #{i}</b>\n"
+            result += f"   ┌─👤 <b>ID:</b> <code>{user_id}</code>\n"
+            result += f"   ├─📛 <b>Имя:</b> {name}\n"
+            result += f"   ├─🔗 <b>Username:</b> {username_display}\n"
+            result += f"   ├─🎭 <b>Роль:</b> {role}\n"
+            result += f"   ├─🎂 <b>Возраст:</b> {age}\n"
+            result += f"   ├─🏙️ <b>Город:</b> {city}\n"
+            result += f"   ├─📷 <b>Фото:</b> {photo_status}\n"
+            result += f"   └─📅 <b>Создана:</b> {created_date}\n"
+            
+            if i < len(profiles):
+                result += "   \n"  # Разделитель между анкетами
+        
+        # Если сообщение слишком длинное, разбиваем на части
+        if len(result) > 4000:
+            parts = [result[i:i+4000] for i in range(0, len(result), 4000)]
+            for part in parts:
+                await message.answer(part, parse_mode="HTML")
+                await asyncio.sleep(0.5)
         else:
-            result += "📭 Анкет нет в базе данных"
+            await message.answer(result, parse_mode="HTML")
             
-        await message.answer(f"<pre>{result}</pre>")
-        
     except Exception as e:
-        await message.answer(f"❌ Ошибка при получении данных: {e}")
+        await message.answer(f"❌ Ошибка при получении данных: {str(e)}")
 
 # Кнопка "Создать анкету"
 @dp.message(F.text == "📝 Создать анкету")
@@ -333,7 +354,7 @@ async def cancel_anketa(message: types.Message, state: FSMContext):
     await message.answer("Заполнение анкеты отменено", reply_markup=main_menu)
 
 # Шаг 1: Имя
-@dp.message(ProfileStates.waiting_name, F.text)
+@dp.message(ProfileStates.waiting_name)
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     
@@ -344,13 +365,13 @@ async def process_name(message: types.Message, state: FSMContext):
     
     await state.update_data(name=name)
     await message.answer(
-        "🎭 Напишите вашу роль:",
+        "🎭 Напишите вашу роль (например: Разработчик, Дизайнер, Студент и т.д.):",
         reply_markup=cancel_menu
     )
     await state.set_state(ProfileStates.waiting_role)
 
 # Шаг 2: Роль
-@dp.message(ProfileStates.waiting_role, F.text)
+@dp.message(ProfileStates.waiting_role)
 async def process_role(message: types.Message, state: FSMContext):
     role = message.text.strip()
     
@@ -367,7 +388,7 @@ async def process_role(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_age)
 
 # Шаг 3: Возраст
-@dp.message(ProfileStates.waiting_age, F.text)
+@dp.message(ProfileStates.waiting_age)
 async def process_age(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Пожалуйста, введите число:")
@@ -385,7 +406,7 @@ async def process_age(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_city)
 
 # Шаг 4: Город
-@dp.message(ProfileStates.waiting_city, F.text)
+@dp.message(ProfileStates.waiting_city)
 async def process_city(message: types.Message, state: FSMContext):
     city = message.text.strip()
     
@@ -399,7 +420,7 @@ async def process_city(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_bio)
 
 # Шаг 5: О себе
-@dp.message(ProfileStates.waiting_bio, F.text)
+@dp.message(ProfileStates.waiting_bio)
 async def process_bio(message: types.Message, state: FSMContext):
     bio = message.text.strip()
     
@@ -422,7 +443,6 @@ async def process_photo(message: types.Message, state: FSMContext):
         
         success, action = await save_profile(
             message.from_user.id,
-            message.from_user.full_name,
             message.from_user.username,
             user_data['name'],
             user_data['role'],
@@ -452,21 +472,16 @@ async def process_photo(message: types.Message, state: FSMContext):
         await message.answer("❌ Ошибка. Попробуйте снова.", reply_markup=main_menu)
         await state.clear()
 
-# Если пользователь в состоянии ожидания фото, но отправил не фото
-@dp.message(ProfileStates.waiting_photo)
-async def process_photo_invalid(message: types.Message, state: FSMContext):
-    await message.answer("📸 Пожалуйста, отправьте фото для анкеты:")
-
 # Просмотр своей анкеты
 @dp.message(F.text == "👤 Моя анкета")
 @dp.message(Command("myprofile"))
 async def show_profile(message: types.Message):
     try:
-        cursor = await db.execute("SELECT * FROM flood WHERE users_id = ?", (message.from_user.id,))
+        cursor = await db.execute("SELECT * FROM profiles WHERE user_id = ?", (message.from_user.id,))
         profile = await cursor.fetchone()
         
         if profile:
-            users_id, full_name, username, name, role, age, city, bio, photo, is_active, created_at, updated_at = profile
+            user_id, username, name, role, age, city, bio, photo, is_active, created_at, updated_at = profile
             await message.answer_photo(
                 photo=photo,
                 caption=f"📋 <b>Ваша анкета:</b>\n\n"
@@ -489,7 +504,7 @@ async def show_profile(message: types.Message):
 async def search_profiles(message: types.Message):
     try:
         cursor = await db.execute(
-            "SELECT name, role, age, city, bio, photo FROM flood WHERE users_id != ? AND is_active = 1 LIMIT 3",
+            "SELECT name, role, age, city, bio, photo FROM profiles WHERE user_id != ? AND is_active = 1 LIMIT 3",
             (message.from_user.id,)
         )
         profiles = await cursor.fetchall()
@@ -524,7 +539,7 @@ async def report_user(message: types.Message):
         reported_user_id = message.reply_to_message.from_user.id
         
         # Проверяем существует ли анкета
-        cursor = await db.execute("SELECT 1 FROM flood WHERE users_id = ?", (reported_user_id,))
+        cursor = await db.execute("SELECT 1 FROM profiles WHERE user_id = ?", (reported_user_id,))
         if not await cursor.fetchone():
             await message.answer("❌ У этого пользователя нет анкеты")
             return
@@ -604,7 +619,7 @@ async def unban_user(message: types.Message):
 @dp.message(Command("delete"))
 async def delete_profile(message: types.Message):
     try:
-        await db.execute("DELETE FROM flood WHERE users_id = ?", (message.from_user.id,))
+        await db.execute("DELETE FROM profiles WHERE user_id = ?", (message.from_user.id,))
         await db.commit()
         await message.answer("✅ Ваша анкета удалена", reply_markup=main_menu)
     except Exception as e:
@@ -617,7 +632,7 @@ async def stats_command(message: types.Message):
         return
     
     try:
-        cursor = await db.execute("SELECT COUNT(*) FROM flood")
+        cursor = await db.execute("SELECT COUNT(*) FROM profiles")
         total_profiles = await cursor.fetchone()
         
         cursor = await db.execute("SELECT COUNT(*) FROM banned_users")
@@ -639,18 +654,12 @@ async def stats_command(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-# Обработчик других сообщений - ТОЛЬКО когда пользователь не в состоянии
+# Обработчик других сообщений
 @dp.message()
 async def other_messages(message: types.Message):
     if message.chat.type != "private":
         return
-        
-    # Получаем текущее состояние пользователя
-    current_state = await dp.current_state(user=message.from_user.id).get_state()
-    
-    # Если пользователь не в состоянии - показываем меню
-    if current_state is None:
-        await message.answer("Используйте кнопки меню для навигации", reply_markup=main_menu)
+    await message.answer("Используйте кнопки меню для навигации", reply_markup=main_menu)
 
 # Запуск бота
 async def main():
