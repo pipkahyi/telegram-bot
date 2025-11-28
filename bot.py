@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
@@ -31,7 +32,7 @@ ADMIN_ID = 7788888499
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
 # Глобальное соединение с БД
 db = None
@@ -332,7 +333,7 @@ async def cancel_anketa(message: types.Message, state: FSMContext):
     await message.answer("Заполнение анкеты отменено", reply_markup=main_menu)
 
 # Шаг 1: Имя
-@dp.message(ProfileStates.waiting_name)
+@dp.message(ProfileStates.waiting_name, F.text)
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     
@@ -343,13 +344,13 @@ async def process_name(message: types.Message, state: FSMContext):
     
     await state.update_data(name=name)
     await message.answer(
-        "🎭 Напишите вашу роль (например: Разработчик, Дизайнер, Студент и т.д.):",
+        "🎭 Напишите вашу роль:",
         reply_markup=cancel_menu
     )
     await state.set_state(ProfileStates.waiting_role)
 
 # Шаг 2: Роль
-@dp.message(ProfileStates.waiting_role)
+@dp.message(ProfileStates.waiting_role, F.text)
 async def process_role(message: types.Message, state: FSMContext):
     role = message.text.strip()
     
@@ -366,7 +367,7 @@ async def process_role(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_age)
 
 # Шаг 3: Возраст
-@dp.message(ProfileStates.waiting_age)
+@dp.message(ProfileStates.waiting_age, F.text)
 async def process_age(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Пожалуйста, введите число:")
@@ -384,7 +385,7 @@ async def process_age(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_city)
 
 # Шаг 4: Город
-@dp.message(ProfileStates.waiting_city)
+@dp.message(ProfileStates.waiting_city, F.text)
 async def process_city(message: types.Message, state: FSMContext):
     city = message.text.strip()
     
@@ -398,7 +399,7 @@ async def process_city(message: types.Message, state: FSMContext):
     await state.set_state(ProfileStates.waiting_bio)
 
 # Шаг 5: О себе
-@dp.message(ProfileStates.waiting_bio)
+@dp.message(ProfileStates.waiting_bio, F.text)
 async def process_bio(message: types.Message, state: FSMContext):
     bio = message.text.strip()
     
@@ -450,6 +451,11 @@ async def process_photo(message: types.Message, state: FSMContext):
     except Exception as e:
         await message.answer("❌ Ошибка. Попробуйте снова.", reply_markup=main_menu)
         await state.clear()
+
+# Если пользователь в состоянии ожидания фото, но отправил не фото
+@dp.message(ProfileStates.waiting_photo)
+async def process_photo_invalid(message: types.Message, state: FSMContext):
+    await message.answer("📸 Пожалуйста, отправьте фото для анкеты:")
 
 # Просмотр своей анкеты
 @dp.message(F.text == "👤 Моя анкета")
@@ -633,12 +639,18 @@ async def stats_command(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-# Обработчик других сообщений
+# Обработчик других сообщений - ТОЛЬКО когда пользователь не в состоянии
 @dp.message()
 async def other_messages(message: types.Message):
     if message.chat.type != "private":
         return
-    await message.answer("Используйте кнопки меню для навигации", reply_markup=main_menu)
+        
+    # Получаем текущее состояние пользователя
+    current_state = await dp.current_state(user=message.from_user.id).get_state()
+    
+    # Если пользователь не в состоянии - показываем меню
+    if current_state is None:
+        await message.answer("Используйте кнопки меню для навигации", reply_markup=main_menu)
 
 # Запуск бота
 async def main():
