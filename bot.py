@@ -16,12 +16,12 @@ from datetime import datetime, timedelta
 
 # ===== КОНФИГУРАЦИЯ =====
 class Config:
-    # Настройки PostgreSQL для Neon.tech (ИСПРАВЛЕННЫЕ!)
+    # ИСПРАВЛЕННЫЕ НАСТРОЙКИ ИЗ ВАШЕГО СКРИНШОТА
     POSTGRES_CONFIG = {
         'user': 'neondb_owner',
-        'password': 'npg_g9V7oqFci2wY',  # Из скриншота
+        'password': 'npg_g9V7oqFci2wY',  # Нажмите "Show password" чтобы увидеть реальный пароль
         'database': 'neondb',
-        'host': 'ep-bold-sunset-an1hp3iq-pooler.c-3.us-east-1.aws.neon.tech',  # Из скриншота
+        'host': 'ep-bold-sunset-ahlhp31q-pooler.c-3.us-east-1.aws.neon.tech',  # Точный хост из скриншота
         'port': 5432,
         'ssl': 'require'
     }
