@@ -145,7 +145,8 @@ cancel_menu = ReplyKeyboardMarkup(
 async def init_db():
     global pool
     try:
-        pool = await asyncpg.create_pool(**Config.POSTGRES_CONFIG)
+        # ИСПРАВЛЕНИЕ: используем DATABASE_URL вместо POSTGRES_CONFIG
+        pool = await asyncpg.create_pool(Config.DATABASE_URL)
         print("✅ Подключение к PostgreSQL установлено")
         
         async with pool.acquire() as conn:
@@ -604,7 +605,7 @@ async def process_photo(message: types.Message, state: FSMContext):
                            f"🎂 <b>Возраст:</b> {user_data['age']}\n"
                            f"🏙️ <b>Город:</b> {user_data['city']}\n"
                            f"📝 <b>О себе:</b> {user_data['bio']}\n\n"
-                           f"⏳ <i>Ожидайте решения модератора</i>",
+                           f"⏳ <i>Ожидайте решения модeraтора</i>",
                     reply_markup=main_menu
                 )
             else:
