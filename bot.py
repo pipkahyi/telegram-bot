@@ -17,14 +17,7 @@ from datetime import datetime, timedelta
 # ===== КОНФИГУРАЦИЯ =====
 class Config:
     # ИСПРАВЛЕННЫЕ НАСТРОЙКИ ИЗ ВАШЕГО СКРИНШОТА
-    POSTGRES_CONFIG = {
-        'user': 'neondb_owner',
-        'password': 'npg_g9V7oqFCiZwY',  # Нажмите "Show password" чтобы увидеть реальный пароль
-        'database': 'neondb',
-        'host': 'ep-bold-sunset-ahlhp31q-pooler.c-3.us-east-1.aws.neon.tech',  # Точный хост из скриншота
-        'port': 5432,
-        'ssl': 'require'
-    }
+    DATABASE_URL = "postgresql://neondb_owner:npg_g9V7oqFCiZwY@ep-bold-sunset-ahlhp31q-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
     # Токен бота
     BOT_TOKEN = "8240552495:AAF-g-RGQKzxIGuXs5PQZwf1Asp6hIJ93U4"
