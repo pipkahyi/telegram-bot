@@ -27,7 +27,7 @@ class Config:
     MODERATORS = [7788088499]  # список ID модераторов
     
     # Группа для модерации (замените на ID вашей группы)
-    MODERATION_GROUP_ID = -5069006369  # ID группы куда отправлять анкеты
+    MODERATION_GROUP_ID = -5069006369 
     
     # Тип модерации: "group" или "private"
     MODERATION_TYPE = "group"  # Изменили на группу!
