@@ -19,7 +19,7 @@ class Config:
     # ИСПРАВЛЕННЫЕ НАСТРОЙКИ ИЗ ВАШЕГО СКРИНШОТА
     POSTGRES_CONFIG = {
         'user': 'neondb_owner',
-        'password': 'npg_g9V7oqFci2wY',  # Нажмите "Show password" чтобы увидеть реальный пароль
+        'password': 'npg_g9V7oqFCiZwY',  # Нажмите "Show password" чтобы увидеть реальный пароль
         'database': 'neondb',
         'host': 'ep-bold-sunset-ahlhp31q-pooler.c-3.us-east-1.aws.neon.tech',  # Точный хост из скриншота
         'port': 5432,
