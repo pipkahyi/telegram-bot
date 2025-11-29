@@ -45,7 +45,7 @@ class Config:
     BAD_WORDS = ['Котакбас', 'Секс', 'Порно', 'Дошан', 'Тошан', 'Котак', 'Еблан']
     
     # Лимиты для пользователей
-    FREE_MAX_PROFILES = 1б
+    FREE_MAX_PROFILES = 1
     FREE_DAILY_SEARCHES = 5
     PREMIUM_MAX_PROFILES = 10
 
