@@ -1267,7 +1267,7 @@ async def delete_own_profile(message: types.Message):
         logger.error(f"❌ Ошибка удаления анкеты: {e}")
         await message.answer("❌ Ошибка при удалении анкеты")
 
-# ===== АДМИНСКИЕ КОМАНДЫ =====
+# ===== АДМИНСКИЕ КОМАНДЫ (ИСПРАВЛЕННЫЕ) =====
 @dp.message(Command("admin_list"))
 async def admin_list_profiles(message: types.Message):
     """Просмотр всех анкет (только для админов)"""
@@ -1277,9 +1277,19 @@ async def admin_list_profiles(message: types.Message):
     
     try:
         async with pool.acquire() as conn:
+            # Сначала проверим структуру таблицы
+            columns = await conn.fetch("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'profiles' 
+                ORDER BY ordinal_position
+            """)
+            
+            logger.info(f"Структура таблицы profiles: {[col['column_name'] for col in columns]}")
+            
+            # Получаем все анкеты
             profiles = await conn.fetch("""
-                SELECT id, user_id, name, role, age, city, status, is_active 
-                FROM profiles 
+                SELECT * FROM profiles 
                 ORDER BY created_at DESC LIMIT 50
             """)
             
@@ -1287,22 +1297,34 @@ async def admin_list_profiles(message: types.Message):
                 profile_list = "👑 <b>АДМИН: ВСЕ АНКЕТЫ</b>\n\n"
                 
                 for profile in profiles:
+                    # Логируем доступные ключи для отладки
+                    logger.info(f"Доступные ключи в профиле: {list(profile.keys())}")
+                    
                     status_icons = {
                         'pending': '⏳',
                         'approved': '✅', 
                         'rejected': '❌'
                     }
-                    active_icon = '🟢' if profile['is_active'] else '🔴'
+                    active_icon = '🟢' if profile.get('is_active', True) else '🔴'
+                    
+                    # Используем безопасное извлечение значений
+                    profile_id = profile.get('id') or 'N/A'
+                    user_id = profile.get('user_id') or 'N/A'
+                    name = profile.get('name') or 'Не указано'
+                    role = profile.get('role') or 'Не указано'
+                    age = profile.get('age') or 'Не указано'
+                    city = profile.get('city') or 'Не указано'
+                    status = profile.get('status') or 'unknown'
                     
                     profile_list += (
-                        f"{active_icon} <b>ID:</b> {profile['id']} | {status_icons.get(profile['status'], '❓')}\n"
-                        f"👤 <b>User ID:</b> {profile['user_id']}\n"
-                        f"📝 <b>Имя:</b> {profile['name']}\n"
-                        f"🎭 <b>Роль:</b> {profile['role']}\n"
-                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                        f"🏙️ <b>Город:</b> {profile['city']}\n"
-                        f"📊 <b>Статус:</b> {profile['status']}\n"
-                        f"🛠️ <b>Действия:</b> /delete_{profile['id']}\n"
+                        f"{active_icon} <b>ID:</b> {profile_id} | {status_icons.get(status, '❓')}\n"
+                        f"👤 <b>User ID:</b> {user_id}\n"
+                        f"📝 <b>Имя:</b> {name}\n"
+                        f"🎭 <b>Роль:</b> {role}\n"
+                        f"🎂 <b>Возраст:</b> {age}\n"
+                        f"🏙️ <b>Город:</b> {city}\n"
+                        f"📊 <b>Статус:</b> {status}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{user_id}\n"
                         f"─────────────────────\n"
                     )
                 
@@ -1316,50 +1338,49 @@ async def admin_list_profiles(message: types.Message):
 
 @dp.message(F.text.startswith("/delete_"))
 async def admin_delete_profile(message: types.Message):
-    """Удаление анкеты по ID (только для админов)"""
+    """Удаление анкеты по user_id (только для админов)"""
     if not is_admin(message.from_user.id):
         await message.answer("❌ Эта команда только для администраторов")
         return
     
     try:
-        # Извлекаем ID из команды (/delete_123)
-        profile_id = message.text.replace("/delete_", "").strip()
+        # Извлекаем user_id из команды (/delete_6679733450)
+        user_id = message.text.replace("/delete_", "").strip()
         
-        if not profile_id.isdigit():
-            await message.answer("❌ Неверный формат ID. Используйте: /delete_123")
+        if not user_id.isdigit():
+            await message.answer("❌ Неверный формат User ID. Используйте: /delete_6679733450")
             return
         
-        profile_id = int(profile_id)
+        user_id = int(user_id)
         
         async with pool.acquire() as conn:
             # Получаем информацию об анкете перед удалением
             profile = await conn.fetchrow(
-                "SELECT user_id, name FROM profiles WHERE id = $1",
-                profile_id
+                "SELECT user_id, name FROM profiles WHERE user_id = $1",
+                user_id
             )
             
             if not profile:
-                await message.answer(f"❌ Анкета с ID {profile_id} не найдена")
+                await message.answer(f"❌ Анкета с User ID {user_id} не найдена")
                 return
             
             # Удаляем анкету (делаем неактивной)
             await conn.execute(
-                "UPDATE profiles SET is_active = FALSE WHERE id = $1",
-                profile_id
+                "UPDATE profiles SET is_active = FALSE WHERE user_id = $1",
+                user_id
             )
             
             await message.answer(
                 f"✅ <b>Анкета удалена!</b>\n\n"
-                f"🗑️ <b>ID анкеты:</b> {profile_id}\n"
+                f"🗑️ <b>User ID:</b> {user_id}\n"
                 f"👤 <b>Имя:</b> {profile['name']}\n"
-                f"🔢 <b>User ID:</b> {profile['user_id']}\n"
                 f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
             )
             
             # Уведомляем пользователя (если возможно)
             try:
                 await bot.send_message(
-                    profile['user_id'],
+                    user_id,
                     "❌ <b>ВАША АНКЕТА БЫЛА УДАЛЕНА АДМИНИСТРАТОРОМ</b>\n\n"
                     "Если вы считаете, что это произошло по ошибке, "
                     f"свяжитесь с поддержкой: {Config.SUPPORT_CONTACT}"
@@ -1379,17 +1400,16 @@ async def find_profiles(message: types.Message):
         return
     
     try:
-        # Извлекаем поисковый запрос (/find Иван)
+        # Извлекаем поисковый запрос (/find Жупар)
         search_query = message.text.replace("/find", "").strip()
         
         if not search_query:
-            await message.answer("❌ Укажите имя для поиска: /find Иван")
+            await message.answer("❌ Укажите имя для поиска: /find Жупар")
             return
         
         async with pool.acquire() as conn:
             profiles = await conn.fetch("""
-                SELECT id, user_id, name, role, age, city, status, is_active 
-                FROM profiles 
+                SELECT * FROM profiles 
                 WHERE name ILIKE $1 OR role ILIKE $1 OR city ILIKE $1
                 ORDER BY created_at DESC LIMIT 20
             """, f"%{search_query}%")
@@ -1403,16 +1423,25 @@ async def find_profiles(message: types.Message):
                         'approved': '✅', 
                         'rejected': '❌'
                     }
-                    active_icon = '🟢' if profile['is_active'] else '🔴'
+                    active_icon = '🟢' if profile.get('is_active', True) else '🔴'
+                    
+                    # Используем безопасное извлечение значений
+                    profile_id = profile.get('id') or 'N/A'
+                    user_id = profile.get('user_id') or 'N/A'
+                    name = profile.get('name') or 'Не указано'
+                    role = profile.get('role') or 'Не указано'
+                    age = profile.get('age') or 'Не указано'
+                    city = profile.get('city') or 'Не указано'
+                    status = profile.get('status') or 'unknown'
                     
                     profile_list += (
-                        f"{active_icon} <b>ID:</b> {profile['id']} | {status_icons.get(profile['status'], '❓')}\n"
-                        f"👤 <b>User ID:</b> {profile['user_id']}\n"
-                        f"📝 <b>Имя:</b> {profile['name']}\n"
-                        f"🎭 <b>Роль:</b> {profile['role']}\n"
-                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                        f"🏙️ <b>Город:</b> {profile['city']}\n"
-                        f"🛠️ <b>Действия:</b> /delete_{profile['id']}\n"
+                        f"{active_icon} <b>ID:</b> {profile_id} | {status_icons.get(status, '❓')}\n"
+                        f"👤 <b>User ID:</b> {user_id}\n"
+                        f"📝 <b>Имя:</b> {name}\n"
+                        f"🎭 <b>Роль:</b> {role}\n"
+                        f"🎂 <b>Возраст:</b> {age}\n"
+                        f"🏙️ <b>Город:</b> {city}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{user_id}\n"
                         f"─────────────────────\n"
                     )
                 
