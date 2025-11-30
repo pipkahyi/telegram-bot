@@ -1314,7 +1314,7 @@ async def admin_list_profiles(message: types.Message):
         logger.error(f"❌ Ошибка загрузки списка админа: {e}")
         await message.answer("❌ Ошибка при загрузке списка")
 
-@dp.message(Command(startswith="delete_"))
+@dp.message(F.text.startswith("/delete_"))
 async def admin_delete_profile(message: types.Message):
     """Удаление анкеты по ID (только для админов)"""
     if not is_admin(message.from_user.id):
