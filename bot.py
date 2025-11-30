@@ -48,18 +48,15 @@ class Config:
         'premium_month': 12000,   # Премиум: 12,000₸/месяц
     }
     
-    # Поддерживаемые языки
-    SUPPORTED_LANGUAGES = ['ru', 'kz']
-    
     # Реквизиты для оплаты
     PAYMENT_DETAILS = {
         'kaspi': '+7 702 473 8282',
-        'halyk': 'Пока нет',
-        'jusan': 'Пока нет',
+        'halyk': '4400 4301 1234 5678',
+        'jusan': '1234 5678 9012 3456',
     }
     
     # Контакт поддержки
-    SUPPORT_CONTACT = "@ваша_поддержка"
+    SUPPORT_CONTACT = "@Baeline"
 
 # ===== СОСТОЯНИЯ FSM =====
 class ProfileStates(StatesGroup):
@@ -80,7 +77,6 @@ pool = None
 
 # ===== СИСТЕМА ЗАЩИТЫ =====
 user_cooldowns = defaultdict(dict)
-user_languages = defaultdict(lambda: 'ru')
 
 def contains_bad_words(text):
     text_lower = text.lower()
@@ -149,28 +145,16 @@ async def protection_middleware(handler, event: types.Message, data):
     return await handler(event, data)
 
 # ===== КЛАВИАТУРЫ =====
-def get_main_menu(user_id):
-    lang = user_languages[user_id]
-    if lang == 'kz':
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📝 Анкета жасау"), KeyboardButton(text="👤 Менің анкетам")],
-                [KeyboardButton(text="🔍 Анкета іздеу"), KeyboardButton(text="📋 Анкеталар тізімі")],
-                [KeyboardButton(text="💰 Бағалар"), KeyboardButton(text="📊 Статистика")],
-                [KeyboardButton(text="🌐 Тілді өзгерту"), KeyboardButton(text="ℹ️ Анықтама")]
-            ],
-            resize_keyboard=True
-        )
-    else:
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📝 Создать анкету"), KeyboardButton(text="👤 Моя анкета")],
-                [KeyboardButton(text="🔍 Найти анкеты"), KeyboardButton(text="📋 Список анкет")],
-                [KeyboardButton(text="💰 Тарифы"), KeyboardButton(text="📊 Статистика")],
-                [KeyboardButton(text="🌐 Сменить язык"), KeyboardButton(text="ℹ️ Помощь")]
-            ],
-            resize_keyboard=True
-        )
+def get_main_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📝 Создать анкету"), KeyboardButton(text="👤 Моя анкета")],
+            [KeyboardButton(text="🔍 Найти анкеты"), KeyboardButton(text="📋 Список анкет")],
+            [KeyboardButton(text="💰 Тарифы"), KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="ℹ️ Помощь")]
+        ],
+        resize_keyboard=True
+    )
 
 cancel_menu = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Отмена")]],
@@ -193,12 +177,6 @@ def get_bank_menu(plan):
         [InlineKeyboardButton(text="🏦 Jusan Bank", callback_data=f"bank_jusan_{plan}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_buy")]
     ])
-
-# Клавиатура выбора языка
-language_menu = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
-    [InlineKeyboardButton(text="🇰🇿 Қазақша", callback_data="lang_kz")]
-])
 
 # ===== БАЗА ДАННЫХ =====
 async def init_db():
@@ -296,15 +274,6 @@ async def init_db():
                     status TEXT DEFAULT 'pending',
                     screenshot_file_id TEXT,
                     created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            
-            # Таблица языков пользователей
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_languages (
-                    user_id BIGINT PRIMARY KEY,
-                    language_code TEXT NOT NULL DEFAULT 'ru',
-                    updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
             
@@ -595,23 +564,6 @@ async def create_subscription(user_id, plan):
         print(f"❌ Ошибка создания подписки: {e}")
         return False, "Ошибка активации подписки"
 
-async def process_payment(user_id, plan):
-    """Обрабатывает платеж"""
-    try:
-        async with pool.acquire() as conn:
-            amount = Config.PRICES[plan]
-            await conn.execute(
-                "INSERT INTO payments (user_id, amount, plan, status) VALUES ($1, $2, $3, 'completed')",
-                user_id, amount, plan
-            )
-            
-            success, message = await create_subscription(user_id, plan)
-            return success, message
-            
-    except Exception as e:
-        print(f"❌ Ошибка обработки платежа: {e}")
-        return False, "Ошибка обработки платежа"
-
 async def generate_payment_instructions(plan, bank):
     """Генерирует инструкции для оплаты"""
     plan_names = {
@@ -680,17 +632,6 @@ async def generate_beautiful_profiles_list(profiles, title="📋 СПИСОК А
 # ===== КОМАНДЫ БОТА =====
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
-    try:
-        async with pool.acquire() as conn:
-            lang_row = await conn.fetchrow(
-                "SELECT language_code FROM user_languages WHERE user_id = $1",
-                message.from_user.id
-            )
-            if lang_row:
-                user_languages[message.from_user.id] = lang_row['language_code']
-    except:
-        pass
-    
     welcome_text = (
         "👋 <b>Добро пожаловать в бот для анкет!</b>\n\n"
         "📝 <b>Создать анкету</b> - заполните информацию о себе\n"
@@ -699,15 +640,13 @@ async def start_command(message: types.Message):
         "📋 <b>Список анкет</b> - красивый список всех анкет\n"
         "💰 <b>Тарифы</b> - информация о премиум подписке\n"
         "📊 <b>Статистика</b> - статистика бота\n"
-        "🌐 <b>Сменить язык</b> - изменить язык интерфейса\n"
         "ℹ️ <b>Помощь</b> - показать это сообщение\n\n"
         "<i>Выберите действие на клавиатуре ниже 👇</i>"
     )
-    await message.answer(welcome_text, reply_markup=get_main_menu(message.from_user.id))
+    await message.answer(welcome_text, reply_markup=get_main_menu())
 
 @dp.message(Command("help"))
 @dp.message(F.text == "ℹ️ Помощь")
-@dp.message(F.text == "ℹ️ Анықтама")
 async def help_command(message: types.Message):
     help_text = (
         "📋 <b>Доступные команды:</b>\n\n"
@@ -723,52 +662,13 @@ async def help_command(message: types.Message):
         "/report - пожаловаться на пользователя\n"
         "/list - список одобренных анкет\n"
         "/stats - статистика\n"
-        "/buy - купить премиум подписку\n"
-        "/language - сменить язык"
+        "/buy - купить премиум подписку"
     )
-    await message.answer(help_text, reply_markup=get_main_menu(message.from_user.id))
-
-# ===== ЯЗЫКИ =====
-@dp.message(Command("language"))
-@dp.message(F.text == "🌐 Сменить язык")
-@dp.message(F.text == "🌐 Тілді өзгерту")
-async def language_command(message: types.Message):
-    await message.answer(
-        "🌐 <b>Выберите язык / Тілді таңдаңыз</b>\n\n"
-        "🇷🇺 Русский\n"
-        "🇰🇿 Қазақша",
-        reply_markup=language_menu
-    )
-
-@dp.callback_query(F.data.startswith("lang_"))
-async def set_language(callback: types.CallbackQuery):
-    language = callback.data.replace("lang_", "")
-    user_id = callback.from_user.id
-    user_languages[user_id] = language
-    
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO user_languages (user_id, language_code) 
-                VALUES ($1, $2)
-                ON CONFLICT (user_id) 
-                DO UPDATE SET language_code = $2, updated_at = NOW()
-            """, user_id, language)
-    except Exception as e:
-        print(f"❌ Ошибка сохранения языка: {e}")
-    
-    if language == 'kz':
-        text = "🌐 Тіл қазақ тіліне өзгертілді!"
-    else:
-        text = "🌐 Язык изменен на русский!"
-    
-    await callback.message.edit_text(text)
-    await callback.answer()
+    await message.answer(help_text, reply_markup=get_main_menu())
 
 # ===== КРАСИВЫЙ СПИСОК АНКЕТ =====
 @dp.message(Command("list"))
 @dp.message(F.text == "📋 Список анкет")
-@dp.message(F.text == "📋 Анкеталар тізімі")
 async def list_profiles(message: types.Message):
     try:
         async with pool.acquire() as conn:
@@ -787,7 +687,7 @@ async def list_profiles(message: types.Message):
                 
             await message.answer(
                 "👀 <b>Используйте поиск для просмотра фото анкет</b>",
-                reply_markup=get_main_menu(message.from_user.id)
+                reply_markup=get_main_menu()
             )
                 
     except Exception as e:
@@ -796,7 +696,6 @@ async def list_profiles(message: types.Message):
 # ===== СИСТЕМА ПОДПИСОК =====
 @dp.message(Command("buy"))
 @dp.message(F.text == "💰 Тарифы")
-@dp.message(F.text == "💰 Бағалар")
 async def buy_premium(message: types.Message):
     pricing_text = f"""
 💰 <b>Тарифы бота</b>
@@ -842,6 +741,7 @@ async def handle_payment_selection(callback: types.CallbackQuery):
     plan = callback.data.replace("buy_", "")
     
     async with pool.acquire() as conn:
+        # ПРОВЕРКА: есть ли уже активный pending платеж
         active_payment = await conn.fetchrow(
             "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending'",
             user_id
@@ -876,6 +776,7 @@ async def handle_bank_selection(callback: types.CallbackQuery, state: FSMContext
     bank, plan = data.split("_", 1)
     
     async with pool.acquire() as conn:
+        # ДВОЙНАЯ ПРОВЕРКА: есть ли уже активный pending платеж
         active_payment = await conn.fetchrow(
             "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending'",
             callback.from_user.id
@@ -925,12 +826,30 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
     
     try:
         async with pool.acquire() as conn:
+            # ТРОЙНАЯ ПРОВЕРКА: есть ли уже активный pending платеж
+            active_payment = await conn.fetchrow(
+                "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending'",
+                message.from_user.id
+            )
+            
+            if active_payment:
+                await message.answer(
+                    "❌ У вас уже есть платеж на проверке. Дождитесь его обработки.",
+                    reply_markup=get_main_menu()
+                )
+                await state.clear()
+                return
+            
+            # Сохраняем платеж
             await conn.execute(
                 "INSERT INTO payments (user_id, amount, plan, status, screenshot_file_id) VALUES ($1, $2, $3, 'pending', $4)",
                 message.from_user.id, user_data['amount'], user_data['plan'], photo
             )
     except Exception as e:
         print(f"❌ Ошибка сохранения платежа: {e}")
+        await message.answer("❌ Ошибка при сохранении платежа", reply_markup=get_main_menu())
+        await state.clear()
+        return
     
     payment_text = (
         f"🆕 <b>НОВЫЙ ПЛАТЕЖ</b>\n\n"
@@ -949,6 +868,8 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         ]
     ])
     
+    # Отправляем админам
+    sent_count = 0
     for admin_id in [Config.ADMIN_ID] + Config.MODERATORS:
         try:
             await bot.send_photo(
@@ -957,15 +878,19 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
                 caption=payment_text,
                 reply_markup=payment_keyboard
             )
+            sent_count += 1
         except Exception as e:
             print(f"❌ Не удалось отправить уведомление админу {admin_id}: {e}")
     
-    await message.answer(
-        "✅ Скриншот отправлен на проверку!\n\n"
-        "Мы активируем вашу подписку в течение 24 часов после проверки платежа.\n"
-        "Спасибо за покупку! ❤️",
-        reply_markup=get_main_menu(message.from_user.id)
-    )
+    if sent_count == 0:
+        await message.answer("❌ Не удалось уведомить администраторов", reply_markup=get_main_menu())
+    else:
+        await message.answer(
+            "✅ Скриншот отправлен на проверку!\n\n"
+            "Мы активируем вашу подписку в течение 24 часов после проверки платежа.\n"
+            "Спасибо за покупку! ❤️",
+            reply_markup=get_main_menu()
+        )
     
     await state.clear()
 
@@ -983,35 +908,55 @@ async def confirm_payment(callback: types.CallbackQuery):
         
         print(f"🔧 DEBUG: Подтверждение платежа - user_id: {user_id}, plan: {plan}")
         
-        success, message = await process_payment(user_id, plan)
-        
-        if success:
-            await callback.message.edit_text(
-                f"✅ <b>Платеж подтвержден!</b>\n\n"
-                f"👤 <b>Пользователь:</b> {user_id}\n"
-                f"📋 <b>Тариф:</b> {plan}\n"
-                f"💵 <b>Сумма:</b> {Config.PRICES[plan]}₸\n"
-                f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-                reply_markup=None
+        async with pool.acquire() as conn:
+            # Находим pending платеж
+            payment = await conn.fetchrow(
+                "SELECT id, amount FROM payments WHERE user_id = $1 AND plan = $2 AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+                user_id, plan
             )
             
-            try:
-                plan_names = {
-                    'basic_month': 'Базовый',
-                    'pro_month': 'Профи', 
-                    'premium_month': 'Премиум'
-                }
-                await bot.send_message(
-                    user_id,
-                    f"🎉 <b>Ваш платеж подтвержден!</b>\n\n"
-                    f"💎 <b>Тариф:</b> {plan_names.get(plan, plan)}\n"
-                    f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                    f"Спасибо за покупку! ❤️"
+            if not payment:
+                await callback.answer("❌ Платеж не найден или уже обработан", show_alert=True)
+                return
+            
+            # Обновляем статус платежа
+            await conn.execute(
+                "UPDATE payments SET status = 'completed' WHERE id = $1",
+                payment['id']
+            )
+            
+            # Активируем подписку
+            success, message = await create_subscription(user_id, plan)
+            
+            if success:
+                # Обновляем сообщение
+                await callback.message.edit_text(
+                    f"✅ <b>Платеж подтвержден!</b>\n\n"
+                    f"👤 <b>Пользователь:</b> {user_id}\n"
+                    f"📋 <b>Тариф:</b> {plan}\n"
+                    f"💵 <b>Сумма:</b> {payment['amount']}₸\n"
+                    f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                    reply_markup=None
                 )
-            except Exception as e:
-                print(f"❌ Не удалось уведомить пользователя: {e}")
-        else:
-            await callback.message.edit_text(f"❌ Ошибка: {message}")
+                
+                # Уведомляем пользователя
+                try:
+                    plan_names = {
+                        'basic_month': 'Базовый',
+                        'pro_month': 'Профи', 
+                        'premium_month': 'Премиум'
+                    }
+                    await bot.send_message(
+                        user_id,
+                        f"🎉 <b>Ваш платеж подтвержден!</b>\n\n"
+                        f"💎 <b>Тариф:</b> {plan_names.get(plan, plan)}\n"
+                        f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                        f"Спасибо за покупку! ❤️"
+                    )
+                except Exception as e:
+                    print(f"❌ Не удалось уведомить пользователя: {e}")
+            else:
+                await callback.message.edit_text(f"❌ Ошибка: {message}")
         
         await callback.answer()
         
@@ -1026,16 +971,25 @@ async def reject_payment(callback: types.CallbackQuery):
         return
     
     try:
-        # ИСПРАВЛЕНИЕ: правильное извлечение user_id
-        data_parts = callback.data.replace("reject_payment_", "").split("_")
-        user_id = int(data_parts[0])
+        user_id = int(callback.data.replace("reject_payment_", ""))
         
         print(f"🔧 DEBUG: Отклонение платежа - user_id: {user_id}")
         
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE payments SET status = 'rejected' WHERE user_id = $1 AND status = 'pending'",
+            # Находим pending платеж
+            payment = await conn.fetchrow(
+                "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
                 user_id
+            )
+            
+            if not payment:
+                await callback.answer("❌ Платеж не найден или уже обработан", show_alert=True)
+                return
+            
+            # Обновляем статус платежа
+            await conn.execute(
+                "UPDATE payments SET status = 'rejected' WHERE id = $1",
+                payment['id']
             )
         
         await callback.message.edit_text(
@@ -1045,6 +999,7 @@ async def reject_payment(callback: types.CallbackQuery):
             reply_markup=None
         )
         
+        # Уведомляем пользователя
         try:
             await bot.send_message(
                 user_id,
@@ -1188,7 +1143,6 @@ async def handle_moderation(callback: types.CallbackQuery):
 
 # ===== СОЗДАНИЕ АНКЕТЫ =====
 @dp.message(F.text == "📝 Создать анкету")
-@dp.message(F.text == "📝 Анкета жасау")
 async def start_anketa(message: types.Message, state: FSMContext):
     limits = await check_user_limits(message.from_user.id)
     
@@ -1203,7 +1157,7 @@ async def start_anketa(message: types.Message, state: FSMContext):
                 f"❌ Вы достигли лимита бесплатных анкет (1 анкета).\n\n"
                 "💎 <b>Премиум подписка</b> позволяет создавать до 10 анкет!\n"
                 "Нажмите '💰 Тарифы' для получения информации.",
-                reply_markup=get_main_menu(message.from_user.id)
+                reply_markup=get_main_menu()
             )
         return
 
@@ -1217,7 +1171,7 @@ async def start_anketa(message: types.Message, state: FSMContext):
 @dp.message(F.text == "❌ Отмена")
 async def cancel_anketa(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Заполнение анкеты отменено", reply_markup=get_main_menu(message.from_user.id))
+    await message.answer("Заполнение анкеты отменено", reply_markup=get_main_menu())
 
 @dp.message(ProfileStates.waiting_name)
 async def process_name(message: types.Message, state: FSMContext):
@@ -1320,18 +1274,18 @@ async def process_photo(message: types.Message, state: FSMContext):
                            f"🏙️ <b>Город:</b> {user_data['city']}\n"
                            f"📝 <b>О себе:</b> {user_data['bio']}\n\n"
                            f"⏳ <i>Ожидайте решения модератора. Кто первый возьмет - тот и проверит!</i>",
-                    reply_markup=get_main_menu(message.from_user.id)
+                    reply_markup=get_main_menu()
                 )
             else:
-                await message.answer("❌ Ошибка отправки на модерацию", reply_markup=get_main_menu(message.from_user.id))
+                await message.answer("❌ Ошибка отправки на модерацию", reply_markup=get_main_menu())
             
             await state.clear()
         else:
-            await message.answer(f"❌ Ошибка: {action}", reply_markup=get_main_menu(message.from_user.id))
+            await message.answer(f"❌ Ошибка: {action}", reply_markup=get_main_menu())
             await state.clear()
         
     except Exception as e:
-        await message.answer("❌ Ошибка. Попробуйте снова.", reply_markup=get_main_menu(message.from_user.id))
+        await message.answer("❌ Ошибка. Попробуйте снова.", reply_markup=get_main_menu())
         await state.clear()
 
 @dp.message(ProfileStates.waiting_photo, ~F.photo)
@@ -1340,7 +1294,6 @@ async def process_photo_invalid(message: types.Message, state: FSMContext):
 
 # ===== ПРОСМОТР АНКЕТ =====
 @dp.message(F.text == "👤 Моя анкета")
-@dp.message(F.text == "👤 Менің анкетам")
 @dp.message(Command("myprofile"))
 async def show_profile(message: types.Message):
     try:
@@ -1366,16 +1319,15 @@ async def show_profile(message: types.Message):
                            f"🏙️ <b>Город:</b> {profile['city']}\n"
                            f"📝 <b>О себе:</b> {profile['bio']}\n\n"
                            f"📊 <b>Статус:</b> {status_text}",
-                    reply_markup=get_main_menu(message.from_user.id)
+                    reply_markup=get_main_menu()
                 )
             else:
-                await message.answer("У вас нет активной анкеты. Создайте её!", reply_markup=get_main_menu(message.from_user.id))
+                await message.answer("У вас нет активной анкеты. Создайте её!", reply_markup=get_main_menu())
                 
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
 
 @dp.message(F.text == "🔍 Найти анкеты")
-@dp.message(F.text == "🔍 Анкета іздеу")
 @dp.message(Command("search"))
 async def search_profiles(message: types.Message):
     can_search, searches_left = await check_search_limit(message.from_user.id)
@@ -1385,7 +1337,7 @@ async def search_profiles(message: types.Message):
             f"❌ Вы исчерпали лимит поисков на сегодня ({Config.FREE_DAILY_SEARCHES} в день).\n\n"
             "💎 <b>Премиум подписка</b> снимает все ограничения!\n"
             "Нажмите '💰 Тарифы' для получения информации.",
-            reply_markup=get_main_menu(message.from_user.id)
+            reply_markup=get_main_menu()
         )
         return
     
@@ -1416,14 +1368,13 @@ async def search_profiles(message: types.Message):
                 if searches_left > 0:
                     await message.answer(f"🔍 Осталось поисков сегодня: {searches_left}")
             else:
-                await message.answer("Пока нет других анкет.", reply_markup=get_main_menu(message.from_user.id))
+                await message.answer("Пока нет других анкет.", reply_markup=get_main_menu())
                 
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
 
 # ===== СТАТИСТИКА =====
 @dp.message(Command("stats"))
-@dp.message(F.text == "📊 Статистика")
 @dp.message(F.text == "📊 Статистика")
 async def stats_command(message: types.Message):
     try:
