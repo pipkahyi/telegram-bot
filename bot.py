@@ -1,5 +1,4 @@
-﻿dair = 1488  
-import asyncpg
+﻿import asyncpg
 import asyncio
 import re
 import time
