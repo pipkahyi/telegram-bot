@@ -252,7 +252,7 @@ async def init_db():
                 )
             """)
             
-            # Таблица платежей
+            # Таблица платежей - ИСПРАВЛЕННАЯ ВЕРСИЯ
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS payments (
                     id SERIAL PRIMARY KEY,
@@ -262,7 +262,8 @@ async def init_db():
                     status TEXT DEFAULT 'pending',
                     screenshot_file_id TEXT,
                     bank TEXT,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    processed_at TIMESTAMP
                 )
             """)
             
@@ -477,22 +478,25 @@ async def confirm_payment(callback: types.CallbackQuery):
                 return
             
             await conn.execute(
-                "UPDATE payments SET status = 'completed' WHERE id = $1",
+                "UPDATE payments SET status = 'completed', processed_at = NOW() WHERE id = $1",
                 payment['id']
             )
             
             success, message = await create_subscription(user_id, plan)
             
             if success:
-                await callback.message.edit_text(
+                # Отправляем новое сообщение вместо редактирования
+                await callback.message.answer(
                     f"✅ <b>ПЛАТЕЖ ПОДТВЕРЖДЕН</b>\n\n"
                     f"👤 <b>Пользователь:</b> {user_id}\n"
                     f"📋 <b>Тариф:</b> {plan}\n"
                     f"💵 <b>Сумма:</b> {payment['amount']}₸\n"
                     f"👨‍💼 <b>Подтвердил:</b> {callback.from_user.first_name}\n"
-                    f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-                    reply_markup=None
+                    f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
                 )
+                
+                # Убираем кнопки у старого сообщения
+                await callback.message.edit_reply_markup(reply_markup=None)
                 
                 try:
                     plan_names = {
@@ -541,19 +545,22 @@ async def reject_payment(callback: types.CallbackQuery):
                 return
             
             await conn.execute(
-                "UPDATE payments SET status = 'rejected' WHERE id = $1",
+                "UPDATE payments SET status = 'rejected', processed_at = NOW() WHERE id = $1",
                 payment['id']
             )
         
-        await callback.message.edit_text(
+        # Отправляем новое сообщение вместо редактирования
+        await callback.message.answer(
             f"❌ <b>ПЛАТЕЖ ОТКЛОНЕН</b>\n\n"
             f"👤 <b>Пользователь:</b> {user_id}\n"
             f"📋 <b>Тариф:</b> {payment['plan']}\n"
             f"💵 <b>Сумма:</b> {payment['amount']}₸\n"
             f"👨‍💼 <b>Отклонил:</b> {callback.from_user.first_name}\n"
-            f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            reply_markup=None
+            f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         )
+        
+        # Убираем кнопки у старого сообщения
+        await callback.message.edit_reply_markup(reply_markup=None)
         
         try:
             await bot.send_message(
