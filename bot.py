@@ -1239,6 +1239,191 @@ async def stats_command(message: types.Message):
         logger.error(f"❌ Ошибка статистики: {e}")
         await message.answer("❌ Ошибка при загрузке статистики")
 
+# ===== СИСТЕМА УДАЛЕНИЯ АНКЕТ =====
+@dp.message(Command("delete"))
+async def delete_own_profile(message: types.Message):
+    """Удаление своей анкеты"""
+    try:
+        async with pool.acquire() as conn:
+            # Удаляем анкету пользователя (делаем неактивной)
+            result = await conn.execute(
+                "UPDATE profiles SET is_active = FALSE WHERE user_id = $1 AND is_active = TRUE",
+                message.from_user.id
+            )
+            
+            if "UPDATE 1" in result:
+                await message.answer(
+                    "✅ <b>Ваша анкета успешно удалена!</b>\n\n"
+                    "Вы можете создать новую анкету в любое время.",
+                    reply_markup=get_main_menu()
+                )
+            else:
+                await message.answer(
+                    "❌ <b>У вас нет активной анкеты для удаления.</b>",
+                    reply_markup=get_main_menu()
+                )
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка удаления анкеты: {e}")
+        await message.answer("❌ Ошибка при удалении анкеты")
+
+# ===== АДМИНСКИЕ КОМАНДЫ =====
+@dp.message(Command("admin_list"))
+async def admin_list_profiles(message: types.Message):
+    """Просмотр всех анкет (только для админов)"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Эта команда только для администраторов")
+        return
+    
+    try:
+        async with pool.acquire() as conn:
+            profiles = await conn.fetch("""
+                SELECT id, user_id, name, role, age, city, status, is_active 
+                FROM profiles 
+                ORDER BY created_at DESC LIMIT 50
+            """)
+            
+            if profiles:
+                profile_list = "👑 <b>АДМИН: ВСЕ АНКЕТЫ</b>\n\n"
+                
+                for profile in profiles:
+                    status_icons = {
+                        'pending': '⏳',
+                        'approved': '✅', 
+                        'rejected': '❌'
+                    }
+                    active_icon = '🟢' if profile['is_active'] else '🔴'
+                    
+                    profile_list += (
+                        f"{active_icon} <b>ID:</b> {profile['id']} | {status_icons.get(profile['status'], '❓')}\n"
+                        f"👤 <b>User ID:</b> {profile['user_id']}\n"
+                        f"📝 <b>Имя:</b> {profile['name']}\n"
+                        f"🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                        f"🏙️ <b>Город:</b> {profile['city']}\n"
+                        f"📊 <b>Статус:</b> {profile['status']}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{profile['id']}\n"
+                        f"─────────────────────\n"
+                    )
+                
+                await message.answer(profile_list)
+            else:
+                await message.answer("📭 Нет анкет в базе данных")
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки списка админа: {e}")
+        await message.answer("❌ Ошибка при загрузке списка")
+
+@dp.message(Command(startswith="delete_"))
+async def admin_delete_profile(message: types.Message):
+    """Удаление анкеты по ID (только для админов)"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Эта команда только для администраторов")
+        return
+    
+    try:
+        # Извлекаем ID из команды (/delete_123)
+        profile_id = message.text.replace("/delete_", "").strip()
+        
+        if not profile_id.isdigit():
+            await message.answer("❌ Неверный формат ID. Используйте: /delete_123")
+            return
+        
+        profile_id = int(profile_id)
+        
+        async with pool.acquire() as conn:
+            # Получаем информацию об анкете перед удалением
+            profile = await conn.fetchrow(
+                "SELECT user_id, name FROM profiles WHERE id = $1",
+                profile_id
+            )
+            
+            if not profile:
+                await message.answer(f"❌ Анкета с ID {profile_id} не найдена")
+                return
+            
+            # Удаляем анкету (делаем неактивной)
+            await conn.execute(
+                "UPDATE profiles SET is_active = FALSE WHERE id = $1",
+                profile_id
+            )
+            
+            await message.answer(
+                f"✅ <b>Анкета удалена!</b>\n\n"
+                f"🗑️ <b>ID анкеты:</b> {profile_id}\n"
+                f"👤 <b>Имя:</b> {profile['name']}\n"
+                f"🔢 <b>User ID:</b> {profile['user_id']}\n"
+                f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            )
+            
+            # Уведомляем пользователя (если возможно)
+            try:
+                await bot.send_message(
+                    profile['user_id'],
+                    "❌ <b>ВАША АНКЕТА БЫЛА УДАЛЕНА АДМИНИСТРАТОРОМ</b>\n\n"
+                    "Если вы считаете, что это произошло по ошибке, "
+                    f"свяжитесь с поддержкой: {Config.SUPPORT_CONTACT}"
+                )
+            except Exception as e:
+                logger.error(f"❌ Не удалось уведомить пользователя: {e}")
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка удаления анкеты админом: {e}")
+        await message.answer("❌ Ошибка при удалении анкеты")
+
+@dp.message(Command("find"))
+async def find_profiles(message: types.Message):
+    """Поиск анкет по имени (только для админов)"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Эта команда только для администраторов")
+        return
+    
+    try:
+        # Извлекаем поисковый запрос (/find Иван)
+        search_query = message.text.replace("/find", "").strip()
+        
+        if not search_query:
+            await message.answer("❌ Укажите имя для поиска: /find Иван")
+            return
+        
+        async with pool.acquire() as conn:
+            profiles = await conn.fetch("""
+                SELECT id, user_id, name, role, age, city, status, is_active 
+                FROM profiles 
+                WHERE name ILIKE $1 OR role ILIKE $1 OR city ILIKE $1
+                ORDER BY created_at DESC LIMIT 20
+            """, f"%{search_query}%")
+            
+            if profiles:
+                profile_list = f"🔍 <b>РЕЗУЛЬТАТЫ ПОИСКА: '{search_query}'</b>\n\n"
+                
+                for profile in profiles:
+                    status_icons = {
+                        'pending': '⏳',
+                        'approved': '✅', 
+                        'rejected': '❌'
+                    }
+                    active_icon = '🟢' if profile['is_active'] else '🔴'
+                    
+                    profile_list += (
+                        f"{active_icon} <b>ID:</b> {profile['id']} | {status_icons.get(profile['status'], '❓')}\n"
+                        f"👤 <b>User ID:</b> {profile['user_id']}\n"
+                        f"📝 <b>Имя:</b> {profile['name']}\n"
+                        f"🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                        f"🏙️ <b>Город:</b> {profile['city']}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{profile['id']}\n"
+                        f"─────────────────────\n"
+                    )
+                
+                await message.answer(profile_list)
+            else:
+                await message.answer(f"🔍 По запросу '{search_query}' ничего не найдено")
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска анкет: {e}")
+        await message.answer("❌ Ошибка при поиске анкет")
+
 # ===== ЗАПУСК БОТА =====
 async def main():
     try:
