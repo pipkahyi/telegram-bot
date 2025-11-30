@@ -64,6 +64,7 @@ class Config:
 class ProfileStates(StatesGroup):
     waiting_name = State()
     waiting_role = State()
+    waiting_fandom = State()  # Новое состояние для фандома
     waiting_age = State()
     waiting_city = State()
     waiting_bio = State()
@@ -211,14 +212,14 @@ async def init_db():
         logger.info("✅ Подключение к PostgreSQL установлено")
         
         async with pool.acquire() as conn:
-            # Таблица профилей
+            # Таблица профилей - ИСПРАВЛЕННАЯ ВЕРСИЯ
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS profiles (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL,
+                    user_id BIGINT PRIMARY KEY,
                     username TEXT,
                     name TEXT NOT NULL,
                     role TEXT NOT NULL,
+                    fandom TEXT,
                     age INTEGER NOT NULL,
                     city TEXT NOT NULL,
                     bio TEXT NOT NULL,
@@ -230,6 +231,11 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
+            """)
+            
+            # Добавляем столбец fandom если его нет
+            await conn.execute("""
+                ALTER TABLE profiles ADD COLUMN IF NOT EXISTS fandom TEXT;
             """)
             
             # Таблица банов
@@ -372,38 +378,34 @@ async def increment_search_count(user_id):
     except Exception as e:
         logger.error(f"❌ Ошибка увеличения счетчика поиска: {e}")
 
-async def save_profile(user_id, username, name, role, age, city, bio, photo):
+async def save_profile(user_id, username, name, role, fandom, age, city, bio, photo):
     try:
         async with pool.acquire() as conn:
-            existing_profile = await conn.fetchrow(
-                "SELECT id FROM profiles WHERE user_id = $1 AND is_active = TRUE", 
-                user_id
-            )
+            # Используем INSERT с ON CONFLICT для обновления существующей записи
+            await conn.execute("""
+                INSERT INTO profiles 
+                (user_id, username, name, role, fandom, age, city, bio, photo, status, is_active) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', TRUE)
+                ON CONFLICT (user_id) 
+                DO UPDATE SET 
+                    username = $2,
+                    name = $3,
+                    role = $4,
+                    fandom = $5,
+                    age = $6,
+                    city = $7,
+                    bio = $8,
+                    photo = $9,
+                    status = 'pending',
+                    is_active = TRUE,
+                    updated_at = NOW()
+            """, user_id, username, name, role, fandom, age, city, bio, photo)
             
-            if existing_profile:
-                await conn.execute("""
-                    UPDATE profiles SET 
-                    username = $1, name = $2, role = $3, age = $4, city = $5, 
-                    bio = $6, photo = $7, updated_at = NOW(), status = 'pending'
-                    WHERE id = $8
-                """, username, name, role, age, city, bio, photo, existing_profile['id'])
-                profile_id = existing_profile['id']
-                action = "обновлена"
-            else:
-                result = await conn.fetchrow("""
-                    INSERT INTO profiles 
-                    (user_id, username, name, role, age, city, bio, photo) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    RETURNING id
-                """, user_id, username, name, role, age, city, bio, photo)
-                profile_id = result['id']
-                action = "создана"
-            
-            return True, action, profile_id
+            return True, "сохранена"
             
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения профиля для user_id {user_id}: {e}")
-        return False, str(e), None
+        return False, str(e)
 
 async def create_subscription(user_id, plan):
     try:
@@ -896,6 +898,20 @@ async def process_role(message: types.Message, state: FSMContext):
         await message.answer("❌ Роль должна содержать минимум 2 символа. Попробуйте еще раз:")
         return
     await state.update_data(role=role)
+    await message.answer("📚 Напишите ваш фандом:", reply_markup=get_cancel_menu())
+    await state.set_state(ProfileStates.waiting_fandom)
+
+@dp.message(ProfileStates.waiting_fandom)
+async def process_fandom(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_anketa(message, state)
+        return
+        
+    fandom = message.text.strip()
+    if len(fandom) < 2:
+        await message.answer("❌ Фандом должен содержать минимум 2 символа. Попробуйте еще раз:")
+        return
+    await state.update_data(fandom=fandom)
     await message.answer("🔢 Сколько вам лет?", reply_markup=get_cancel_menu())
     await state.set_state(ProfileStates.waiting_age)
 
@@ -953,11 +969,12 @@ async def process_photo(message: types.Message, state: FSMContext):
         user_data = await state.get_data()
         photo_file_id = message.photo[-1].file_id
         
-        success, action, profile_id = await save_profile(
+        success, action = await save_profile(
             message.from_user.id,
             message.from_user.username,
             user_data['name'],
             user_data['role'],
+            user_data.get('fandom', 'Не указан'),  # Добавляем фандом
             user_data['age'],
             user_data['city'],
             user_data['bio'],
@@ -970,6 +987,7 @@ async def process_photo(message: types.Message, state: FSMContext):
                 caption=f"✅ Анкета успешно {action} и отправлена на модерацию!\n\n"
                        f"👤 <b>Имя:</b> {user_data['name']}\n"
                        f"🎭 <b>Роль:</b> {user_data['role']}\n"
+                       f"📚 <b>Фандом:</b> {user_data.get('fandom', 'Не указан')}\n"
                        f"🎂 <b>Возраст:</b> {user_data['age']}\n"
                        f"🏙️ <b>Город:</b> {user_data['city']}\n"
                        f"📝 <b>О себе:</b> {user_data['bio']}\n\n"
@@ -1013,6 +1031,7 @@ async def show_profile(message: types.Message):
                     caption=f"📋 <b>Ваша анкета:</b>\n\n"
                            f"👤 <b>Имя:</b> {profile['name']}\n"
                            f"🎭 <b>Роль:</b> {profile['role']}\n"
+                           f"📚 <b>Фандом:</b> {profile.get('fandom', 'Не указан')}\n"
                            f"🎂 <b>Возраст:</b> {profile['age']}\n"
                            f"🏙️ <b>Город:</b> {profile['city']}\n"
                            f"📝 <b>О себе:</b> {profile['bio']}\n\n"
@@ -1043,7 +1062,7 @@ async def search_profiles(message: types.Message):
     try:
         async with pool.acquire() as conn:
             profiles = await conn.fetch(
-                "SELECT name, role, age, city, bio, photo FROM profiles WHERE user_id != $1 AND status = 'approved' AND is_active = true ORDER BY RANDOM() LIMIT 3",
+                "SELECT name, role, fandom, age, city, bio, photo FROM profiles WHERE user_id != $1 AND status = 'approved' AND is_active = true ORDER BY RANDOM() LIMIT 3",
                 message.from_user.id
             )
             
@@ -1055,8 +1074,9 @@ async def search_profiles(message: types.Message):
                         photo=profile['photo'],
                         caption=f"🔍 <b>Найдена анкета:</b>\n\n"
                                f"👤 <b>Имя:</b> {profile['name']}\n"
-                               f"🎭 <b>Роль:</b> {profile['role']}\n" 
-                               f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                               f"🎭 <b>Роль:</b> {profile['role']}\n"
+                               f"📚 <b>Фандом:</b> {profile.get('fandom', 'Не указан')}\n"
+                               f"🎂 <b>Возраст:</b> {profile['age']}\n" 
                                f"🏙️ <b>Город:</b> {profile['city']}\n"
                                f"📝 <b>О себе:</b> {profile['bio'][:100]}..."
                     )
@@ -1070,97 +1090,6 @@ async def search_profiles(message: types.Message):
         logger.error(f"❌ Ошибка поиска анкет: {e}")
         await message.answer("❌ Ошибка при поиске анкет")
 
-# ... (весь предыдущий код до функции search_profiles остается без изменений)
-
-@dp.message(F.text == "🔍 Найти анкеты")
-@dp.message(Command("search"))
-async def search_profiles(message: types.Message):
-    can_search, searches_left = await check_search_limit(message.from_user.id)
-    
-    if not can_search:
-        await message.answer(
-            f"❌ Вы исчерпали лимит поисков на сегодня ({Config.FREE_DAILY_SEARCHES} в день).\n\n"
-            "💎 <b>Премиум подписка</b> снимает все ограничения!\n"
-            "Нажмите '💰 Тарифы' для получения информации.",
-            reply_markup=get_main_menu()
-        )
-        return
-    
-    try:
-        async with pool.acquire() as conn:
-            profiles = await conn.fetch(
-                "SELECT name, role, age, city, bio, photo FROM profiles WHERE user_id != $1 AND status = 'approved' AND is_active = true ORDER BY RANDOM() LIMIT 3",
-                message.from_user.id
-            )
-            
-            if profiles:
-                await increment_search_count(message.from_user.id)
-                
-                for profile in profiles:
-                    await message.answer_photo(
-                        photo=profile['photo'],
-                        caption=f"🔍 <b>Найдена анкета:</b>\n\n"
-                               f"👤 <b>Имя:</b> {profile['name']}\n"
-                               f"🎭 <b>Роль:</b> {profile['role']}\n" 
-                               f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                               f"🏙️ <b>Город:</b> {profile['city']}\n"
-                               f"📝 <b>О себе:</b> {profile['bio'][:100]}..."
-                    )
-                    
-                if searches_left > 0:
-                    await message.answer(f"🔍 Осталось поисков сегодня: {searches_left}")
-            else:
-                await message.answer("😔 Пока нет других анкет.", reply_markup=get_main_menu())
-                
-    except Exception as e:
-        logger.error(f"❌ Ошибка поиска анкет: {e}")
-        await message.answer("❌ Ошибка при поиске анкет")
-
-dp.message(F.text == "🔍 Найти анкеты")
-@dp.message(Command("search"))
-async def search_profiles(message: types.Message):
-    can_search, searches_left = await check_search_limit(message.from_user.id)
-    
-    if not can_search:
-        await message.answer(
-            f"❌ Вы исчерпали лимит поисков на сегодня ({Config.FREE_DAILY_SEARCHES} в день).\n\n"
-            "💎 <b>Премиум подписка</b> снимает все ограничения!\n"
-            "Нажмите '💰 Тарифы' для получения информации.",
-            reply_markup=get_main_menu()
-        )
-        return
-    
-    try:
-        async with pool.acquire() as conn:
-            profiles = await conn.fetch(
-                "SELECT name, role, age, city, bio, photo FROM profiles WHERE user_id != $1 AND status = 'approved' AND is_active = true ORDER BY RANDOM() LIMIT 3",
-                message.from_user.id
-            )
-            
-            if profiles:
-                await increment_search_count(message.from_user.id)
-                
-                for profile in profiles:
-                    await message.answer_photo(
-                        photo=profile['photo'],
-                        caption=f"🔍 <b>Найдена анкета:</b>\n\n"
-                               f"👤 <b>Имя:</b> {profile['name']}\n"
-                               f"🎭 <b>Роль:</b> {profile['role']}\n" 
-                               f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                               f"🏙️ <b>Город:</b> {profile['city']}\n"
-                               f"📝 <b>О себе:</b> {profile['bio'][:100]}..."
-                    )
-                    
-                if searches_left > 0:
-                    await message.answer(f"🔍 Осталось поисков сегодня: {searches_left}")
-            else:
-                await message.answer("😔 Пока нет других анкет.", reply_markup=get_main_menu())
-                
-    except Exception as e:
-        logger.error(f"❌ Ошибка поиска анкет: {e}")
-        await message.answer("❌ Ошибка при поиске анкет")
-
-# ===== ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ДЛЯ СПИСКА АНКЕТ =====
 @dp.message(F.text == "📋 Список анкет")
 @dp.message(Command("list"))
 async def list_profiles(message: types.Message):
@@ -1168,7 +1097,7 @@ async def list_profiles(message: types.Message):
         async with pool.acquire() as conn:
             # Получаем все одобренные анкеты
             profiles = await conn.fetch(
-                "SELECT name, role, age, city FROM profiles WHERE status = 'approved' AND is_active = true ORDER BY created_at DESC LIMIT 20"
+                "SELECT name, role, fandom, age, city FROM profiles WHERE status = 'approved' AND is_active = true ORDER BY created_at DESC LIMIT 20"
             )
             
             if profiles:
@@ -1179,6 +1108,7 @@ async def list_profiles(message: types.Message):
                     profile_list += (
                         f"{i}. 👤 <b>Имя:</b> {profile['name']}\n"
                         f"   🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"   📚 <b>Фандом:</b> {profile.get('fandom', 'Не указан')}\n"
                         f"   🎂 <b>Возраст:</b> {profile['age']}\n"
                         f"   🏙️ <b>Город:</b> {profile['city']}\n"
                     )
@@ -1204,7 +1134,6 @@ async def list_profiles(message: types.Message):
             "Попробуйте позже или обратитесь в поддержку."
         )
 
-# ===== ОБРАБОТЧИК СТАТИСТИКИ =====
 @dp.message(Command("stats"))
 @dp.message(F.text == "📊 Статистика")
 async def stats_command(message: types.Message):
@@ -1267,7 +1196,7 @@ async def delete_own_profile(message: types.Message):
         logger.error(f"❌ Ошибка удаления анкеты: {e}")
         await message.answer("❌ Ошибка при удалении анкеты")
 
-# ===== АДМИНСКИЕ КОМАНДЫ (ИСПРАВЛЕННЫЕ) =====
+# ===== АДМИНСКИЕ КОМАНДЫ =====
 @dp.message(Command("admin_list"))
 async def admin_list_profiles(message: types.Message):
     """Просмотр всех анкет (только для админов)"""
@@ -1277,19 +1206,9 @@ async def admin_list_profiles(message: types.Message):
     
     try:
         async with pool.acquire() as conn:
-            # Сначала проверим структуру таблицы
-            columns = await conn.fetch("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'profiles' 
-                ORDER BY ordinal_position
-            """)
-            
-            logger.info(f"Структура таблицы profiles: {[col['column_name'] for col in columns]}")
-            
-            # Получаем все анкеты
             profiles = await conn.fetch("""
-                SELECT * FROM profiles 
+                SELECT user_id, name, role, fandom, age, city, status, is_active 
+                FROM profiles 
                 ORDER BY created_at DESC LIMIT 50
             """)
             
@@ -1297,34 +1216,22 @@ async def admin_list_profiles(message: types.Message):
                 profile_list = "👑 <b>АДМИН: ВСЕ АНКЕТЫ</b>\n\n"
                 
                 for profile in profiles:
-                    # Логируем доступные ключи для отладки
-                    logger.info(f"Доступные ключи в профиле: {list(profile.keys())}")
-                    
                     status_icons = {
                         'pending': '⏳',
                         'approved': '✅', 
                         'rejected': '❌'
                     }
-                    active_icon = '🟢' if profile.get('is_active', True) else '🔴'
-                    
-                    # Используем безопасное извлечение значений
-                    profile_id = profile.get('id') or 'N/A'
-                    user_id = profile.get('user_id') or 'N/A'
-                    name = profile.get('name') or 'Не указано'
-                    role = profile.get('role') or 'Не указано'
-                    age = profile.get('age') or 'Не указано'
-                    city = profile.get('city') or 'Не указано'
-                    status = profile.get('status') or 'unknown'
+                    active_icon = '🟢' if profile['is_active'] else '🔴'
                     
                     profile_list += (
-                        f"{active_icon} <b>ID:</b> {profile_id} | {status_icons.get(status, '❓')}\n"
-                        f"👤 <b>User ID:</b> {user_id}\n"
-                        f"📝 <b>Имя:</b> {name}\n"
-                        f"🎭 <b>Роль:</b> {role}\n"
-                        f"🎂 <b>Возраст:</b> {age}\n"
-                        f"🏙️ <b>Город:</b> {city}\n"
-                        f"📊 <b>Статус:</b> {status}\n"
-                        f"🛠️ <b>Действия:</b> /delete_{user_id}\n"
+                        f"{active_icon} <b>User ID:</b> {profile['user_id']} | {status_icons.get(profile['status'], '❓')}\n"
+                        f"📝 <b>Имя:</b> {profile['name']}\n"
+                        f"🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"📚 <b>Фандом:</b> {profile.get('fandom', 'Не указан')}\n"
+                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                        f"🏙️ <b>Город:</b> {profile['city']}\n"
+                        f"📊 <b>Статус:</b> {profile['status']}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{profile['user_id']}\n"
                         f"─────────────────────\n"
                     )
                 
@@ -1344,11 +1251,11 @@ async def admin_delete_profile(message: types.Message):
         return
     
     try:
-        # Извлекаем user_id из команды (/delete_6679733450)
+        # Извлекаем user_id из команды (/delete_123)
         user_id = message.text.replace("/delete_", "").strip()
         
         if not user_id.isdigit():
-            await message.answer("❌ Неверный формат User ID. Используйте: /delete_6679733450")
+            await message.answer("❌ Неверный формат User ID. Используйте: /delete_123")
             return
         
         user_id = int(user_id)
@@ -1409,8 +1316,9 @@ async def find_profiles(message: types.Message):
         
         async with pool.acquire() as conn:
             profiles = await conn.fetch("""
-                SELECT * FROM profiles 
-                WHERE name ILIKE $1 OR role ILIKE $1 OR city ILIKE $1
+                SELECT user_id, name, role, fandom, age, city, status, is_active 
+                FROM profiles 
+                WHERE name ILIKE $1 OR role ILIKE $1 OR city ILIKE $1 OR fandom ILIKE $1
                 ORDER BY created_at DESC LIMIT 20
             """, f"%{search_query}%")
             
@@ -1423,25 +1331,16 @@ async def find_profiles(message: types.Message):
                         'approved': '✅', 
                         'rejected': '❌'
                     }
-                    active_icon = '🟢' if profile.get('is_active', True) else '🔴'
-                    
-                    # Используем безопасное извлечение значений
-                    profile_id = profile.get('id') or 'N/A'
-                    user_id = profile.get('user_id') or 'N/A'
-                    name = profile.get('name') or 'Не указано'
-                    role = profile.get('role') or 'Не указано'
-                    age = profile.get('age') or 'Не указано'
-                    city = profile.get('city') or 'Не указано'
-                    status = profile.get('status') or 'unknown'
+                    active_icon = '🟢' if profile['is_active'] else '🔴'
                     
                     profile_list += (
-                        f"{active_icon} <b>ID:</b> {profile_id} | {status_icons.get(status, '❓')}\n"
-                        f"👤 <b>User ID:</b> {user_id}\n"
-                        f"📝 <b>Имя:</b> {name}\n"
-                        f"🎭 <b>Роль:</b> {role}\n"
-                        f"🎂 <b>Возраст:</b> {age}\n"
-                        f"🏙️ <b>Город:</b> {city}\n"
-                        f"🛠️ <b>Действия:</b> /delete_{user_id}\n"
+                        f"{active_icon} <b>User ID:</b> {profile['user_id']} | {status_icons.get(profile['status'], '❓')}\n"
+                        f"📝 <b>Имя:</b> {profile['name']}\n"
+                        f"🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"📚 <b>Фандом:</b> {profile.get('fandom', 'Не указан')}\n"
+                        f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                        f"🏙️ <b>Город:</b> {profile['city']}\n"
+                        f"🛠️ <b>Действия:</b> /delete_{profile['user_id']}\n"
                         f"─────────────────────\n"
                     )
                 
