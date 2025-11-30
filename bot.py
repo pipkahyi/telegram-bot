@@ -57,9 +57,9 @@ class Config:
     
     # Реквизиты для оплаты (замените на реальные)
     PAYMENT_DETAILS = {
-        'kaspi': '4400 4301 1234 5678',  # Номер карты Kaspi
-        'halyk': '1234 5678 9012 3456',  # Номер карты Halyk
-        'jusan': '9876 5432 1098 7654',  # Номер карты Jusan
+        'kaspi': '+7 702 473 8282',  # Номер карты Kaspi
+        'halyk': 'Пока нет',  # Номер карты Halyk
+        'jusan': 'Пока нет',  # Номер карты Jusan
     }
     
     # Контакт поддержки
@@ -609,9 +609,9 @@ async def generate_payment_instructions(plan, bank):
     }
     
     bank_names = {
-        'kaspi': 'Kaspi Bank: +7 702 473 8282',
-        'halyk': 'Halyk Bank: пока что нет',
-        'jusan': 'Jusan Bank: пока что нет'
+        'kaspi': 'Kaspi Bank',
+        'halyk': 'Halyk Bank',
+        'jusan': 'Jusan Bank'
     }
     
     amount = Config.PRICES[plan]
@@ -682,8 +682,34 @@ async def help_command(message: types.Message):
     )
     await message.answer(help_text, reply_markup=get_main_menu(message.from_user.id))
 
+# ===== ИСПРАВЛЕНИЕ: ОБРАБОТЧИКИ КАЗАХСКИХ КОМАНД =====
+@dp.message(F.text == "📝 Анкета жасау")
+async def start_anketa_kz(message: types.Message, state: FSMContext):
+    await start_anketa(message, state)
+
+@dp.message(F.text == "👤 Менің анкетам")
+async def my_profile_kz(message: types.Message):
+    await show_profile(message)
+
+@dp.message(F.text == "🔍 Анкета іздеу")
+async def search_profiles_kz(message: types.Message):
+    await search_profiles(message)
+
+@dp.message(F.text == "ℹ️ Анықтама")
+async def help_kz(message: types.Message):
+    await help_command(message)
+
+@dp.message(F.text == "💰 Бағалар")
+async def buy_premium_kz(message: types.Message):
+    await buy_premium(message)
+
+@dp.message(F.text == "📊 Статистика")
+async def stats_kz(message: types.Message):
+    await stats_command(message)
+
 @dp.message(Command("language"))
 @dp.message(F.text == "🌐 Сменить язык")
+@dp.message(F.text == "🌐 Тілді өзгерту")
 async def language_command(message: types.Message):
     await message.answer(
         "🌐 <b>Выберите язык / Тілді таңдаңыз</b>\n\n"
@@ -732,26 +758,32 @@ async def buy_premium(message: types.Message):
 
 🎯 <b>Бесплатный тариф:</b>
 • 1 анкета
-• 5 поисков в день
+• 5 поисков в день  
 • Базовая функциональность
+• Ожидание модерации 1-3 дня
 
 💎 <b>Премиум подписка:</b>
 
-<b>Базовый - 2,000₸/месяц</b>
+<b>Базовый - 500₸/месяц</b>
 • До 3 анкет
-• 20 поисков в день
-• Стандартная модерация
+• 15 поисков в день
+• Приоритетная модерация (24 часа)
+• Поддержка 24/7
 
-<b>Профи - 5,000₸/месяц</b>
-• До 10 анкет  
-• 50 поисков в день
-• Приоритетная модерация
+<b>Профи - 1,000₸/месяц</b>
+• До 10 анкет
+• 30 поисков в день  
+• Срочная модерация (12 часов)
+• Приоритет в поиске
+• Поддержка 24/7
 
-<b>Премиум - 12,000₸/месяц</b>
+<b>Премиум - 2,000₸/месяц</b>
 • Неограниченное количество анкет
 • Неограниченный поиск
-• Мгновенная модерация
+• Мгновенная модерация (1-6 часов)
+• Максимальный приоритет в поиске
 • Расширенная статистика
+• Поддержка 24/7
 
 👇 <b>Выберите тариф:</b>
     """
@@ -763,6 +795,20 @@ async def buy_premium(message: types.Message):
 async def handle_payment_selection(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     plan = callback.data.replace("buy_", "")
+    
+    # ПРОВЕРКА НА ДУБЛИРОВАНИЕ ПЛАТЕЖЕЙ
+    async with pool.acquire() as conn:
+        active_payment = await conn.fetchrow(
+            "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending'",
+            user_id
+        )
+        
+        if active_payment:
+            await callback.answer(
+                "⏳ У вас уже есть платеж на проверке. Дождитесь его обработки.",
+                show_alert=True
+            )
+            return
     
     bank_selection_text = f"""
 💳 <b>Выбор способа оплаты</b>
@@ -784,6 +830,20 @@ async def handle_payment_selection(callback: types.CallbackQuery):
 async def handle_bank_selection(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data.replace("bank_", "")
     bank, plan = data.split("_", 1)
+    
+    # ПРОВЕРКА НА ДУБЛИРОВАНИЕ ПЛАТЕЖЕЙ
+    async with pool.acquire() as conn:
+        active_payment = await conn.fetchrow(
+            "SELECT id FROM payments WHERE user_id = $1 AND status = 'pending'",
+            callback.from_user.id
+        )
+        
+        if active_payment:
+            await callback.answer(
+                "⏳ У вас уже есть платеж на проверке. Дождитесь его обработки.",
+                show_alert=True
+            )
+            return
     
     # Сохраняем данные в состоянии
     await state.update_data(
@@ -821,6 +881,16 @@ async def handle_send_screenshot(callback: types.CallbackQuery, state: FSMContex
 async def process_payment_screenshot(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     photo = message.photo[-1].file_id
+    
+    # Сохраняем платеж в БД со статусом pending
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO payments (user_id, amount, plan, status) VALUES ($1, $2, $3, 'pending')",
+                message.from_user.id, user_data['amount'], user_data['plan']
+            )
+    except Exception as e:
+        print(f"❌ Ошибка сохранения платежа: {e}")
     
     # Уведомляем админов о новом платеже
     payment_text = (
@@ -861,68 +931,103 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
     
     await state.clear()
 
-# Обработка подтверждения платежа админом
+# ===== ИСПРАВЛЕННЫЕ ОБРАБОТЧИКИ ПЛАТЕЖЕЙ =====
 @dp.callback_query(F.data.startswith("confirm_payment_"))
 async def confirm_payment(callback: types.CallbackQuery):
     if not is_moderator(callback.from_user.id):
         await callback.answer("❌ Только для модераторов", show_alert=True)
         return
     
-    parts = callback.data.replace("confirm_payment_", "").split("_")
-    user_id = int(parts[0])
-    plan = parts[1]
-    
-    success, message = await process_payment(user_id, plan)
-    
-    if success:
-        await callback.message.edit_text(
-            f"✅ <b>Платеж подтвержден!</b>\n\n"
-            f"👤 <b>Пользователь:</b> {user_id}\n"
-            f"📋 <b>Тариф:</b> {plan}\n"
-            f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-        )
+    try:
+        # Извлекаем данные из callback
+        data_parts = callback.data.replace("confirm_payment_", "").split("_")
+        user_id = int(data_parts[0])
+        plan = data_parts[1]
         
-        try:
-            await bot.send_message(
-                user_id,
-                f"🎉 <b>Ваш платеж подтвержден!</b>\n\n"
-                f"💎 <b>Тариф:</b> {plan}\n"
-                f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                f"Спасибо за покупку! ❤️"
+        print(f"🔧 DEBUG: Подтверждение платежа - user_id: {user_id}, plan: {plan}")
+        
+        success, message = await process_payment(user_id, plan)
+        
+        if success:
+            # Обновляем сообщение
+            await callback.message.edit_text(
+                f"✅ <b>Платеж подтвержден!</b>\n\n"
+                f"👤 <b>Пользователь:</b> {user_id}\n"
+                f"📋 <b>Тариф:</b> {plan}\n"
+                f"💵 <b>Сумма:</b> {Config.PRICES[plan]}₸\n"
+                f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                reply_markup=None
             )
-        except:
-            pass
-    else:
-        await callback.message.edit_text(f"❌ Ошибка: {message}")
-    
-    await callback.answer()
+            
+            # Уведомляем пользователя
+            try:
+                plan_names = {
+                    'basic_month': 'Базовый',
+                    'pro_month': 'Профи', 
+                    'premium_month': 'Премиум'
+                }
+                await bot.send_message(
+                    user_id,
+                    f"🎉 <b>Ваш платеж подтвержден!</b>\n\n"
+                    f"💎 <b>Тариф:</b> {plan_names.get(plan, plan)}\n"
+                    f"⏰ <b>Активировано:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                    f"Спасибо за покупку! ❤️"
+                )
+            except Exception as e:
+                print(f"❌ Не удалось уведомить пользователя: {e}")
+        else:
+            await callback.message.edit_text(f"❌ Ошибка: {message}")
+        
+        await callback.answer()
+        
+    except Exception as e:
+        print(f"❌ Ошибка подтверждения платежа: {e}")
+        await callback.answer("❌ Ошибка при подтверждении платежа", show_alert=True)
 
-# Обработка отклонения платежа
 @dp.callback_query(F.data.startswith("reject_payment_"))
 async def reject_payment(callback: types.CallbackQuery):
     if not is_moderator(callback.from_user.id):
         await callback.answer("❌ Только для модераторов", show_alert=True)
         return
     
-    user_id = int(callback.data.replace("reject_payment_", ""))
-    
-    await callback.message.edit_text(
-        f"❌ <b>Платеж отклонен</b>\n\n"
-        f"👤 <b>Пользователь:</b> {user_id}\n"
-        f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-    )
-    
     try:
-        await bot.send_message(
-            user_id,
-            "❌ <b>Ваш платеж был отклонен</b>\n\n"
-            "Пожалуйста, свяжитесь с поддержкой для уточнения деталей.\n"
-            f"💬 Поддержка: {Config.SUPPORT_CONTACT}"
+        user_id = int(callback.data.replace("reject_payment_", ""))
+        
+        print(f"🔧 DEBUG: Отклонение платежа - user_id: {user_id}")
+        
+        # Обновляем статус платежа в БД
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE payments SET status = 'rejected' WHERE user_id = $1 AND status = 'pending'",
+                user_id
+            )
+        
+        await callback.message.edit_text(
+            f"❌ <b>Платеж отклонен</b>\n\n"
+            f"👤 <b>Пользователь:</b> {user_id}\n"
+            f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            reply_markup=None
         )
-    except:
-        pass
-    
-    await callback.answer()
+        
+        # Уведомляем пользователя
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ <b>Ваш платеж был отклонен</b>\n\n"
+                "Возможные причины:\n"
+                "• Нечеткий скриншот\n"
+                "• Неправильная сумма\n"
+                "• Подозрительная активность\n\n"
+                f"💬 Для уточнения обратитесь в поддержку: {Config.SUPPORT_CONTACT}"
+            )
+        except Exception as e:
+            print(f"❌ Не удалось уведомить пользователя: {e}")
+        
+        await callback.answer()
+        
+    except Exception as e:
+        print(f"❌ Ошибка отклонения платежа: {e}")
+        await callback.answer("❌ Ошибка при отклонении платежа", show_alert=True)
 
 @dp.callback_query(F.data == "cancel_buy")
 async def cancel_buy(callback: types.CallbackQuery):
@@ -975,33 +1080,40 @@ async def list_profiles(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
-# ===== СИСТЕМА ЖАЛОБ =====
+# ===== ИСПРАВЛЕННАЯ СИСТЕМА ЖАЛОБ =====
 @dp.message(Command("report"))
 async def report_command(message: types.Message):
-    """Начать процесс жалобы на анкету"""
-    await message.answer(
-        "📢 <b>Пожаловаться на анкету</b>\n\n"
-        "Чтобы пожаловаться на анкету, вам нужно:\n"
-        "1. Найти анкету через поиск\n"
-        "2. Отправить команду /report и ID пользователя\n"
-        "3. Указать причину жалобы\n\n"
-        "Пример: <code>/report 123456789 Спам</code>"
-    )
-
-@dp.message(Command("report"))
-async def process_report(message: types.Message):
-    """Обработать жалобу"""
+    """Обработчик жалоб с аргументами"""
     try:
-        parts = message.text.split()
-        if len(parts) < 3:
-            await message.answer("❌ Формат: /report ID_пользователя причина")
+        # Если команда без аргументов - показываем помощь
+        if len(message.text.split()) < 3:
+            await message.answer(
+                "📢 <b>Пожаловаться на анкету</b>\n\n"
+                "Чтобы пожаловаться на анкету:\n"
+                "1. Найдите анкету через поиск\n"
+                "2. Отправьте команду: <code>/report ID_пользователя причина</code>\n\n"
+                "📝 <b>Пример:</b>\n"
+                "<code>/report 123456789 Спам</code>\n"
+                "<code>/report 7927307806 Неприемлемый контент</code>"
+            )
             return
         
+        parts = message.text.split()
         reported_user_id = int(parts[1])
         reason = ' '.join(parts[2:])
         
-        # Сохраняем жалобу в БД
+        # Проверяем существование пользователя
         async with pool.acquire() as conn:
+            profile = await conn.fetchrow(
+                "SELECT name FROM profiles WHERE user_id = $1", 
+                reported_user_id
+            )
+            
+            if not profile:
+                await message.answer("❌ Пользователь с таким ID не найден.")
+                return
+            
+            # Сохраняем жалобу в БД
             await conn.execute(
                 "INSERT INTO reports (reporter_id, reported_user_id, reported_profile_id, reason) VALUES ($1, $2, $3, $4)",
                 message.from_user.id, reported_user_id, reported_user_id, reason
@@ -1011,24 +1123,31 @@ async def process_report(message: types.Message):
         report_text = (
             "🚨 <b>НОВАЯ ЖАЛОБА</b>\n\n"
             f"👤 <b>Жалоба от:</b> {message.from_user.first_name} (ID: {message.from_user.id})\n"
-            f"👥 <b>На пользователя:</b> {reported_user_id}\n"
+            f"👥 <b>На пользователя:</b> {reported_user_id} ({profile['name']})\n"
             f"📝 <b>Причина:</b> {reason}\n"
             f"⏰ <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         )
         
+        report_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👀 Посмотреть анкету", callback_data=f"view_{reported_user_id}"),
+                InlineKeyboardButton(text="🚫 Забанить", callback_data=f"ban_{reported_user_id}")
+            ]
+        ])
+        
         if Config.MODERATION_TYPE == "group":
-            await bot.send_message(Config.MODERATION_GROUP_ID, report_text)
+            await bot.send_message(Config.MODERATION_GROUP_ID, report_text, reply_markup=report_keyboard)
         else:
             for moderator_id in Config.MODERATORS:
                 try:
-                    await bot.send_message(moderator_id, report_text)
+                    await bot.send_message(moderator_id, report_text, reply_markup=report_keyboard)
                 except:
                     pass
         
-        await message.answer("✅ Жалоба отправлена модераторам. Спасибо!")
+        await message.answer("✅ Жалоба отправлена модераторам. Спасибо за бдительность!")
         
     except ValueError:
-        await message.answer("❌ Неверный формат ID пользователя")
+        await message.answer("❌ Неверный формат ID пользователя. ID должен быть числом.")
     except Exception as e:
         await message.answer(f"❌ Ошибка отправки жалобы: {e}")
 
@@ -1253,7 +1372,8 @@ async def search_profiles(message: types.Message):
                         f"🎭 <b>Роль:</b> {role}\n" 
                         f"🎂 <b>Возраст:</b> {age}\n"
                         f"🏙️ <b>Город:</b> {city}\n"
-                        f"📝 <b>О себе:</b> {bio_preview}"
+                        f"📝 <b>О себе:</b> {bio_preview}\n\n"
+                        f"📢 Чтобы пожаловаться: /report {message.from_user.id} причина"
                     )
                     await message.answer_photo(photo=photo, caption=caption)
                     
