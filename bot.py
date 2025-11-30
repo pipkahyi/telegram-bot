@@ -1116,7 +1116,51 @@ async def search_profiles(message: types.Message):
         logger.error(f"❌ Ошибка поиска анкет: {e}")
         await message.answer("❌ Ошибка при поиске анкет")
 
-# ===== НОВЫЙ ОБРАБОТЧИК ДЛЯ СПИСКА АНКЕТ =====
+dp.message(F.text == "🔍 Найти анкеты")
+@dp.message(Command("search"))
+async def search_profiles(message: types.Message):
+    can_search, searches_left = await check_search_limit(message.from_user.id)
+    
+    if not can_search:
+        await message.answer(
+            f"❌ Вы исчерпали лимит поисков на сегодня ({Config.FREE_DAILY_SEARCHES} в день).\n\n"
+            "💎 <b>Премиум подписка</b> снимает все ограничения!\n"
+            "Нажмите '💰 Тарифы' для получения информации.",
+            reply_markup=get_main_menu()
+        )
+        return
+    
+    try:
+        async with pool.acquire() as conn:
+            profiles = await conn.fetch(
+                "SELECT name, role, age, city, bio, photo FROM profiles WHERE user_id != $1 AND status = 'approved' AND is_active = true ORDER BY RANDOM() LIMIT 3",
+                message.from_user.id
+            )
+            
+            if profiles:
+                await increment_search_count(message.from_user.id)
+                
+                for profile in profiles:
+                    await message.answer_photo(
+                        photo=profile['photo'],
+                        caption=f"🔍 <b>Найдена анкета:</b>\n\n"
+                               f"👤 <b>Имя:</b> {profile['name']}\n"
+                               f"🎭 <b>Роль:</b> {profile['role']}\n" 
+                               f"🎂 <b>Возраст:</b> {profile['age']}\n"
+                               f"🏙️ <b>Город:</b> {profile['city']}\n"
+                               f"📝 <b>О себе:</b> {profile['bio'][:100]}..."
+                    )
+                    
+                if searches_left > 0:
+                    await message.answer(f"🔍 Осталось поисков сегодня: {searches_left}")
+            else:
+                await message.answer("😔 Пока нет других анкет.", reply_markup=get_main_menu())
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска анкет: {e}")
+        await message.answer("❌ Ошибка при поиске анкет")
+
+# ===== ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ДЛЯ СПИСКА АНКЕТ =====
 @dp.message(F.text == "📋 Список анкет")
 @dp.message(Command("list"))
 async def list_profiles(message: types.Message):
@@ -1124,41 +1168,42 @@ async def list_profiles(message: types.Message):
         async with pool.acquire() as conn:
             # Получаем все одобренные анкеты
             profiles = await conn.fetch(
-                "SELECT name, role, age, city, bio, photo FROM profiles WHERE status = 'approved' AND is_active = true ORDER BY created_at DESC LIMIT 20"
+                "SELECT name, role, age, city FROM profiles WHERE status = 'approved' AND is_active = true ORDER BY created_at DESC LIMIT 20"
             )
             
             if profiles:
-                await message.answer(f"📋 <b>Список анкет ({len(profiles)}):</b>")
+                # Создаем красивый список
+                profile_list = "📋 <b>СПИСОК АНКЕТ</b>\n\n"
                 
-                for profile in profiles:
-                    try:
-                        await message.answer_photo(
-                            photo=profile['photo'],
-                            caption=f"👤 <b>Имя:</b> {profile['name']}\n"
-                                   f"🎭 <b>Роль:</b> {profile['role']}\n"
-                                   f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                                   f"🏙️ <b>Город:</b> {profile['city']}\n"
-                                   f"📝 <b>О себе:</b> {profile['bio'][:200]}..."
-                        )
-                        # Небольшая задержка чтобы не спамить
-                        await asyncio.sleep(0.5)
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка отправки анкеты: {e}")
-                        # Если не удалось отправить с фото, отправляем текстом
-                        await message.answer(
-                            f"👤 <b>Имя:</b> {profile['name']}\n"
-                            f"🎭 <b>Роль:</b> {profile['role']}\n"
-                            f"🎂 <b>Возраст:</b> {profile['age']}\n"
-                            f"🏙️ <b>Город:</b> {profile['city']}\n"
-                            f"📝 <b>О себе:</b> {profile['bio'][:200]}..."
-                        )
+                for i, profile in enumerate(profiles, 1):
+                    profile_list += (
+                        f"{i}. 👤 <b>Имя:</b> {profile['name']}\n"
+                        f"   🎭 <b>Роль:</b> {profile['role']}\n"
+                        f"   🎂 <b>Возраст:</b> {profile['age']}\n"
+                        f"   🏙️ <b>Город:</b> {profile['city']}\n"
+                    )
+                    
+                    # Добавляем разделитель между анкетами, кроме последней
+                    if i < len(profiles):
+                        profile_list += "   ─────────────────────\n"
+                
+                profile_list += f"\n📊 <i>Всего анкет: {len(profiles)}</i>"
+                
+                await message.answer(profile_list)
             else:
-                await message.answer("😔 Пока нет одобренных анкет.", reply_markup=get_main_menu())
+                await message.answer(
+                    "😔 <b>Пока нет одобренных анкет.</b>\n\n"
+                    "Станьте первым - создайте свою анкету! 📝",
+                    reply_markup=get_main_menu()
+                )
                 
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки списка анкет: {e}")
-        await message.answer("❌ Ошибка при загрузке списка анкет")
-        
+        await message.answer(
+            "❌ <b>Ошибка при загрузке списка анкет</b>\n"
+            "Попробуйте позже или обратитесь в поддержку."
+        )
+
 # ===== ОБРАБОТЧИК СТАТИСТИКИ =====
 @dp.message(Command("stats"))
 @dp.message(F.text == "📊 Статистика")
