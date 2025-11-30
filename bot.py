@@ -1158,6 +1158,7 @@ async def list_profiles(message: types.Message):
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки списка анкет: {e}")
         await message.answer("❌ Ошибка при загрузке списка анкет")
+        
 # ===== ОБРАБОТЧИК СТАТИСТИКИ =====
 @dp.message(Command("stats"))
 @dp.message(F.text == "📊 Статистика")
