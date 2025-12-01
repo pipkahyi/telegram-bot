@@ -36,7 +36,7 @@ class Config:
     
     MODERATION_GROUP_ID = -5069006369 
     
-    SPAM_LIMIT = 5
+    SPAM_LIMIT = 10
     SPAM_WINDOW = 10
     BAN_DURATION = 3600
     
@@ -47,9 +47,9 @@ class Config:
     PREMIUM_MAX_PROFILES = 10
     
     PRICES = {
-        'basic_month': 2000,
-        'pro_month': 5000,
-        'premium_month': 12000,
+        'basic_month': 100,
+        'pro_month': 500,
+        'premium_month': 1000,
     }
     
     PAYMENT_DETAILS = {
@@ -59,7 +59,7 @@ class Config:
     }
     
     SUPPORT_CONTACT = "@Baeline"  # Создатель бота
-    FLOOD_CREATOR = "@Kwizesliv"  # Создатель флуда
+    FLOOD_CREATOR = "@Kwizesil"  # Создатель флуда
 
 # ===== СОСТОЯНИЯ FSM =====
 class ProfileStates(StatesGroup):
@@ -182,9 +182,9 @@ def get_cancel_menu():
 
 def get_premium_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Базовый - 2,000₸/мес", callback_data="buy_basic_month")],
-        [InlineKeyboardButton(text="💎 Профи - 5,000₸/мес", callback_data="buy_pro_month")],
-        [InlineKeyboardButton(text="👑 Премиум - 12,000₸/мес", callback_data="buy_premium_month")],
+        [InlineKeyboardButton(text="💰 Базовый - 100₸/мес", callback_data="buy_basic_month")],
+        [InlineKeyboardButton(text="💎 Профи - 500₸/мес", callback_data="buy_pro_month")],
+        [InlineKeyboardButton(text="👑 Премиум - 1,000₸/мес", callback_data="buy_premium_month")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_buy")]
     ])
 
@@ -1545,7 +1545,7 @@ async def find_profiles(message: types.Message):
         search_query = message.text.replace("/find", "").strip()
         
         if not search_query:
-            await message.answer("❌ Укажите имя для поиска: /find Жупар")
+            await message.answer("❌ Укажите имя для поиска: /find Имя")
             return
         
         async with pool.acquire() as conn:
