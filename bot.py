@@ -33,7 +33,7 @@ class Config:
     
     ADMIN_ID = 7788088499
     # ДОБАВЬТЕ СЮДА ЛЮБЫЕ ID МОДЕРАТОРОВ:
-    MODERATORS = [7788088499, 5370799532, 7991834101]  # Пример: [7788088499, 1234567890, 9876543210]
+    MODERATORS = [7788088499, 5370799532, 7991834101, 8045311633]  # Пример: [7788088499, 1234567890, 9876543210]
     
     MODERATION_GROUP_ID = -5069006369 
     
@@ -60,7 +60,7 @@ class Config:
     }
     
     SUPPORT_CONTACT = "@Baeline"  # Создатель бота
-    FLOOD_CREATOR = "@Kwizesil"  # Создатель флуда
+    FLOOD_CREATOR = "@Kwizesil, @XxzMeduzz, @sun_seyn"  # Создатель флуда
 
 # ===== СОСТОЯНИЯ FSM =====
 class ProfileStates(StatesGroup):
